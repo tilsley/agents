@@ -1,0 +1,13 @@
+{
+  "name": "@tilsley/agents",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*", "agents/*"],
+  "scripts": {
+    "test": "bun test --recursive",
+    "test:reviewer": "cd agents/reviewer-agent && bun test",
+    "test:failure-analyst": "cd agents/failure-analyst && bun test",
+    "test:review-agent": "cd agents/review-agent && bun test",
+    "test:distiller": "cd agents/distiller && bun test",
+    "test:conductor": "cd apps/conductor && bun test"
+  }
+}

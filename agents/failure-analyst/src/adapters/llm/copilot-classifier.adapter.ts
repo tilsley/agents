@@ -52,6 +52,11 @@ export class CopilotClassifierAdapter implements ClassifierLlmPort {
       sections.push(
         `## Failed Check: ${ctx.checkName} (ID: ${ctx.checkRunId})`
       );
+      if (ctx.heuristicHint) {
+        sections.push(
+          `> **Pattern hint:** regex matched \`${ctx.heuristicHint.errorType}\` — suggests \`${ctx.heuristicHint.category}\`. Confirm or override based on full context.`
+        );
+      }
       if (ctx.checkOutput) {
         sections.push(
           `### Check Output\n\`\`\`\n${truncateLog(ctx.checkOutput, { maxLength: 3000 })}\n\`\`\``

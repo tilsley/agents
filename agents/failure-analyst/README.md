@@ -4,17 +4,18 @@ Monitors CI failures, classifies them as code bugs or infra flakes, and routes a
 
 ## Role
 
-The Failure Analyst receives `check_run.completed` events from the conductor, classifies each failure, and emits a `failure-analysis.completed` event with `FailureAnalysis[]` in the payload.
+The Failure Analyst receives `check_run.failed` events from the conductor, classifies each failure, and emits a `failure-analysis.completed` event with `FailureAnalysis[]` in the payload.
 
 **Responsibilities:**
 
 1. Filter check runs to failures (`conclusion === "failure" | "timed_out"`).
-2. Try heuristic classification first (20 regex patterns — no LLM call if matched).
-3. For unclassified checks: fetch annotations + logs from GitHub, call `ClassifierLlmPort`.
-4. Downgrade LLM results with `confidence < 0.6` to `"unknown"`.
-5. Apply retry policy: infra flakes are retried up to `maxRetries` (default 3); at limit, escalate.
-6. Immediately execute retry actions via `GitHubPort.rerunCheckRun()`.
-7. Emit `failure-analysis.completed` with full `FailureAnalysis[]` for downstream agents.
+2. Run heuristics to produce an optional hint (4 unambiguous infra patterns).
+3. Fetch annotations + logs from GitHub for every failed check.
+4. Always call `ClassifierLlmPort` — the LLM makes the final classification, using the hint as context.
+5. Downgrade LLM results with `confidence < 0.6` to `"unknown"`.
+6. Apply retry policy: infra flakes are retried up to `maxRetries` (default 3); at limit, escalate.
+7. Immediately execute retry actions via `GitHubPort.rerunCheckRun()`.
+8. Emit `failure-analysis.completed` with full `FailureAnalysis[]` for downstream agents.
 
 ## Decision Matrix
 
@@ -25,15 +26,26 @@ The Failure Analyst receives `check_run.completed` events from the conductor, cl
 | `code_bug` | `route_to_fixer` |
 | `unknown` | `skip` |
 
-## Heuristic Patterns
+## Classification Approach
 
-Checked before any LLM call. Flake patterns take priority over bug patterns.
+The LLM classifies every failure. Heuristics are a pre-pass that produces a **hint** injected into the LLM prompt — the LLM can confirm or override.
 
-**Infra flakes** (confidence 0.8):
-`ETIMEDOUT`, `ECONNRESET`, `ECONNREFUSED`, `rate limit`, `timeout / timed out`, `socket hang up`, `ENOMEM / out of memory`, `Resource temporarily unavailable`, `flaky / non-deterministic / intermittent`
+**Why not bypass the LLM on heuristic match?**
+Patterns like `timeout` are ambiguous: a test suite timing out from a performance regression introduced in the PR looks identical to an infra flake. The LLM has the PR title, PR body, check output, and logs to tell them apart. The heuristic doesn't.
 
-**Code bugs** (confidence 0.7):
-`SyntaxError / TypeError / ReferenceError`, `compilation error`, `cannot find module / missing import`, `type '...' is not assignable`, `expected ... but received`
+**Heuristic hint patterns** (infra flake, confidence 0.85):
+
+| Pattern | Error type |
+|---|---|
+| `ETIMEDOUT \| ECONNRESET \| ECONNREFUSED` | `network_error` |
+| `rate limit` | `rate_limit` |
+| `socket hang up` | `socket_hangup` |
+| `ENOMEM` | `oom` |
+
+When matched, the LLM prompt includes:
+> **Pattern hint:** regex matched `network_error` — suggests `infra_flake`. Confirm or override based on full context.
+
+All other patterns (TypeErrors, assertion failures, compilation errors, timeouts) are intentionally left to the LLM — they have too many false-positive edge cases for regex to be reliable.
 
 ## Directory Structure
 
@@ -61,14 +73,14 @@ src/
 
 test/
 ├── domain/
-│   ├── classification-policy.test.ts  (26 tests — all heuristic patterns + decision matrix)
-│   ├── retry-policy.test.ts           (5 tests)
-│   └── format-failure-report.test.ts  (7 tests)
+│   ├── classification-policy.test.ts  (hints-only patterns + decision matrix)
+│   ├── retry-policy.test.ts
+│   └── format-failure-report.test.ts
 ├── use-cases/
-│   └── analyze-failure.test.ts        (15 tests — happy/sad paths, mixed heuristic+LLM)
+│   └── analyze-failure.test.ts        (always-LLM behaviour, hint threading, retry/escalate paths)
 └── adapters/
-    ├── copilot-classifier.test.ts     (5 tests — JSON parse, fallback, confidence clamping)
-    └── in-memory-retry-tracker.test.ts (5 tests)
+    ├── copilot-classifier.test.ts     (JSON parse, fallback, confidence clamping)
+    └── in-memory-retry-tracker.test.ts
 ```
 
 ## Key Types
@@ -84,14 +96,24 @@ interface FailureAnalysis {
   signature: FailureSignature; // from @tilsley/shared
   reasoning: string;
 }
+
+interface ClassificationContext {
+  checkName: string;
+  checkRunId: number;
+  checkOutput: string;
+  checkLog: string;
+  prTitle: string;
+  prBody: string;
+  heuristicHint?: { category: FailureCategory; errorType: string } | null;
+}
 ```
 
 ## LLM Adapter
 
-`CopilotClassifierAdapter` wraps `ChatCompletionPort`. Sends a single prompt for all unclassified checks in the batch. Parses a JSON array response:
+`CopilotClassifierAdapter` wraps `ChatCompletionPort`. Sends a single prompt for all failed checks in the batch. When a `heuristicHint` is present, it is prepended to that check's section in the prompt. Parses a JSON array response:
 
 ```json
-[{"checkRunId": 1001, "category": "infra_flake", "errorType": "timeout", "errorPattern": "ETIMEDOUT", "confidence": 0.85, "reasoning": "..."}]
+[{"checkRunId": 1001, "category": "infra_flake", "errorType": "network_error", "errorPattern": "ETIMEDOUT", "confidence": 0.9, "reasoning": "..."}]
 ```
 
 Falls back to `category: "unknown", confidence: 0` on parse failure — never throws.
@@ -105,5 +127,3 @@ Falls back to `category: "unknown", confidence: 0` on parse failure — never th
 ```bash
 bun test --cwd agents/failure-analyst
 ```
-
-61 tests across 6 files.

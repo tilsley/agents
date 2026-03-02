@@ -115,7 +115,7 @@ describe("AnalyzeFailure", () => {
     expect(classifier.classifyFailures).not.toHaveBeenCalled();
   });
 
-  test("uses heuristic when pattern matches (skips LLM)", async () => {
+  test("always calls LLM even when heuristic matches", async () => {
     const github = createMockGitHub();
     const classifier = createMockClassifier();
     const conductor = createMockConductor();
@@ -133,13 +133,15 @@ describe("AnalyzeFailure", () => {
     );
 
     expect(result).toHaveLength(1);
-    expect(result[0].category).toBe("infra_flake");
-    expect(result[0].signature.errorType).toBe("network_error");
-    // LLM should NOT be called since heuristic matched
-    expect(classifier.classifyFailures).not.toHaveBeenCalled();
+    // LLM IS called — heuristic is a hint, not a bypass
+    expect(classifier.classifyFailures).toHaveBeenCalledTimes(1);
+    // Heuristic hint should be passed to LLM context
+    const contexts = (classifier.classifyFailures as ReturnType<typeof mock>).mock.calls[0][0];
+    expect(contexts[0].heuristicHint).not.toBeNull();
+    expect(contexts[0].heuristicHint?.errorType).toBe("network_error");
   });
 
-  test("falls back to LLM when heuristic does not match", async () => {
+  test("calls LLM for all failed checks with no heuristic match", async () => {
     const github = createMockGitHub();
     const classifier = createMockClassifier([
       {
@@ -155,7 +157,6 @@ describe("AnalyzeFailure", () => {
     const tracker = createMockRetryTracker();
     const useCase = new AnalyzeFailure(github, classifier, conductor, tracker);
 
-    // Output that won't match any heuristic
     const result = await useCase.execute(
       makeInput({
         checkRuns: [
@@ -170,6 +171,9 @@ describe("AnalyzeFailure", () => {
     expect(classifier.classifyFailures).toHaveBeenCalledTimes(1);
     expect(result[0].category).toBe("code_bug");
     expect(result[0].decision).toBe("route_to_fixer");
+    // No heuristic hint for this one
+    const contexts = (classifier.classifyFailures as ReturnType<typeof mock>).mock.calls[0][0];
+    expect(contexts[0].heuristicHint).toBeNull();
   });
 
   test("uses unknown when LLM confidence below threshold", async () => {
@@ -267,9 +271,17 @@ describe("AnalyzeFailure", () => {
     expect(github.rerunCheckRun).not.toHaveBeenCalled();
   });
 
-  test("handles mixed heuristic and LLM checks", async () => {
+  test("handles multiple checks — all go to LLM", async () => {
     const github = createMockGitHub();
     const classifier = createMockClassifier([
+      {
+        checkRunId: 1001,
+        category: "infra_flake",
+        errorType: "network_error",
+        errorPattern: "ETIMEDOUT",
+        confidence: 0.9,
+        reasoning: "Network error confirmed",
+      },
       {
         checkRunId: 1002,
         category: "code_bug",
@@ -300,8 +312,12 @@ describe("AnalyzeFailure", () => {
       })
     );
 
+    // Both checks go to LLM
+    expect(classifier.classifyFailures).toHaveBeenCalledTimes(1);
+    const contexts = (classifier.classifyFailures as ReturnType<typeof mock>).mock.calls[0][0];
+    expect(contexts).toHaveLength(2);
+
     expect(result).toHaveLength(2);
-    // 1001 should be heuristic (infra_flake), 1002 should be LLM (code_bug)
     const buildResult = result.find((r) => r.checkRunId === 1001);
     const testResult = result.find((r) => r.checkRunId === 1002);
     expect(buildResult!.category).toBe("infra_flake");
@@ -329,7 +345,7 @@ describe("AnalyzeFailure", () => {
     expect(result).toHaveLength(1);
   });
 
-  test("fetches annotations and logs for LLM checks", async () => {
+  test("fetches annotations and logs for all failed checks", async () => {
     const github = createMockGitHub();
     const classifier = createMockClassifier([
       {
@@ -349,19 +365,29 @@ describe("AnalyzeFailure", () => {
       makeInput({
         checkRuns: [
           makeCheckRun({
-            output: { title: "Some error", summary: "details", text: null },
+            output: { title: "ETIMEDOUT", summary: "network", text: null },
           }),
         ],
       })
     );
 
+    // Annotations and logs fetched even for heuristic-matched checks
     expect(github.getCheckRunAnnotations).toHaveBeenCalledWith("test-org", "test-repo", 1001);
     expect(github.getCheckRunLog).toHaveBeenCalledWith("test-org", "test-repo", 1001);
   });
 
   test("does not rerun code_bug checks", async () => {
     const github = createMockGitHub();
-    const classifier = createMockClassifier();
+    const classifier = createMockClassifier([
+      {
+        checkRunId: 1001,
+        category: "code_bug",
+        errorType: "type_error",
+        errorPattern: "TypeError",
+        confidence: 0.85,
+        reasoning: "Type error in PR code",
+      },
+    ]);
     const conductor = createMockConductor();
     const tracker = createMockRetryTracker();
     const useCase = new AnalyzeFailure(github, classifier, conductor, tracker);

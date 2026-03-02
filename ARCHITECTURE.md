@@ -146,8 +146,10 @@ Classifies CI check run failures and routes them to the right action.
 | Retry limit reached | Escalate regardless of category |
 
 **Classification approach:**
-1. **Heuristic first** — 20 regex patterns against check name + output. If matched at ≥70% confidence, use result directly. Fast, free, no LLM call.
-2. **LLM fallback** — `ClassifierLlmPort` for anything the heuristic couldn't classify. Results below 60% confidence are downgraded to `unknown`.
+1. **Heuristic hint** — 4 regex patterns for unambiguous infra signals (`ETIMEDOUT/ECONNRESET/ECONNREFUSED`, `rate limit`, `socket hang up`, `ENOMEM`). If matched, the result is injected into the LLM prompt as a suggestion the LLM can confirm or override.
+2. **LLM always runs** — `ClassifierLlmPort` is called for every failed check with the full context: check output, annotations, logs, PR title, PR body, and the optional hint. Results below 60% confidence are downgraded to `unknown`.
+
+The LLM bypassed-by-heuristic approach was dropped because patterns like `timeout` are ambiguous — a performance regression looks identical to an infra flake at the regex level. Giving the LLM the hint as context (rather than as a hard answer) keeps the speed benefit for obvious cases without locking in wrong classifications.
 
 **Emits:** `failure-analysis.completed` with `analyses[]` (category, decision, failure signature per check run).
 
@@ -312,7 +314,7 @@ To implement a similar system:
 2. **One use-case per agent action.** `AnalyzeFailure`, `EvaluatePr`, `DistillLessons`, `PatchVulnerabilities` — each is a plain class with typed input/output.
 3. **Ports for everything external.** LLM, GitHub, storage, git — all behind interfaces. This is what makes tests fast and adapters swappable.
 4. **The conductor is just a router.** It doesn't make decisions — it maps event types to agent use-cases and threads context across stages.
-5. **Deterministic policies before LLM calls.** Heuristics, severity filters, semver checks — fast, free, testable. LLM is the fallback or advisor, not the gatekeeper.
+5. **Deterministic policies as hints, not gatekeepers.** Severity filters and semver checks are hard rules (domain layer, no LLM). Regex heuristics are hints — pass them to the LLM as context rather than bypassing the LLM entirely. A pattern like `timeout` looks the same whether it's infra or a performance regression you just introduced; the LLM has the PR diff and title to tell them apart.
 6. **Lessons are facts, not chat history.** The distiller extracts structured `{ problem, solution, context, outcome }` facts. These are injected into future agent prompts as grounded context.
 
 ### Folder structure per agent

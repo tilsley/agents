@@ -7,22 +7,14 @@ export interface HeuristicMatch {
   confidence: number;
 }
 
+// Only patterns that are unambiguously infra — passed to the LLM as a hint,
+// not used to bypass it. "timeout" deliberately omitted: a test timing out
+// because of a performance regression looks identical to an infra flake.
 const FLAKE_PATTERNS: Array<{ regex: RegExp; errorType: string }> = [
   { regex: /ETIMEDOUT|ECONNRESET|ECONNREFUSED/i, errorType: "network_error" },
-  { regex: /rate limit/i, errorType: "rate_limit" },
-  { regex: /timeout|timed?\s*out/i, errorType: "timeout" },
-  { regex: /socket hang up/i, errorType: "socket_hangup" },
-  { regex: /ENOMEM|out of memory/i, errorType: "oom" },
-  { regex: /Resource temporarily unavailable/i, errorType: "resource_unavailable" },
-  { regex: /flaky|non-deterministic|intermittent/i, errorType: "known_flaky" },
-];
-
-const BUG_PATTERNS: Array<{ regex: RegExp; errorType: string }> = [
-  { regex: /SyntaxError|TypeError|ReferenceError/i, errorType: "js_error" },
-  { regex: /compilation error|compile error/i, errorType: "compilation_error" },
-  { regex: /cannot find module|missing import/i, errorType: "import_error" },
-  { regex: /type '.*' is not assignable/i, errorType: "type_error" },
-  { regex: /expected .* but received/i, errorType: "assertion_failure" },
+  { regex: /rate.?limit/i,                        errorType: "rate_limit" },
+  { regex: /socket hang up/i,                     errorType: "socket_hangup" },
+  { regex: /ENOMEM/i,                             errorType: "oom" },
 ];
 
 export function classifyByHeuristic(
@@ -36,19 +28,7 @@ export function classifyByHeuristic(
         category: "infra_flake",
         errorType: pattern.errorType,
         errorPattern: match[0],
-        confidence: 0.8,
-      };
-    }
-  }
-
-  for (const pattern of BUG_PATTERNS) {
-    const match = output.match(pattern.regex);
-    if (match) {
-      return {
-        category: "code_bug",
-        errorType: pattern.errorType,
-        errorPattern: match[0],
-        confidence: 0.7,
+        confidence: 0.85,
       };
     }
   }

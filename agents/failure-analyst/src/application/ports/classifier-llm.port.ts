@@ -7,6 +7,8 @@ export interface ClassificationContext {
   checkLog: string;
   prTitle: string;
   prBody: string;
+  /** Regex-based hint — LLM should use as a signal, not a hard override. */
+  heuristicHint?: { category: FailureCategory; errorType: string } | null;
 }
 
 export interface ClassificationResult {

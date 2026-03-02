@@ -12,7 +12,7 @@ describe("classifyByHeuristic", () => {
     expect(result).not.toBeNull();
     expect(result!.category).toBe("infra_flake");
     expect(result!.errorType).toBe("network_error");
-    expect(result!.confidence).toBe(0.8);
+    expect(result!.confidence).toBe(0.85);
   });
 
   test("classifies ECONNRESET as infra_flake", () => {
@@ -35,11 +35,9 @@ describe("classifyByHeuristic", () => {
     expect(result!.errorType).toBe("rate_limit");
   });
 
-  test("classifies timeout as infra_flake", () => {
+  test("does not classify timeout as infra_flake (ambiguous — let LLM decide)", () => {
     const result = classifyByHeuristic("ci/tests", "Test timed out after 30000ms");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("infra_flake");
-    expect(result!.errorType).toBe("timeout");
+    expect(result).toBeNull();
   });
 
   test("classifies socket hang up as infra_flake", () => {
@@ -56,59 +54,19 @@ describe("classifyByHeuristic", () => {
     expect(result!.errorType).toBe("oom");
   });
 
-  test("classifies TypeError as code_bug", () => {
+  test("does not classify TypeError as code_bug (delegated to LLM)", () => {
     const result = classifyByHeuristic("ci/tests", "TypeError: Cannot read property 'id'");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("code_bug");
-    expect(result!.errorType).toBe("js_error");
-    expect(result!.confidence).toBe(0.7);
+    expect(result).toBeNull();
   });
 
-  test("classifies SyntaxError as code_bug", () => {
+  test("does not classify SyntaxError as code_bug (delegated to LLM)", () => {
     const result = classifyByHeuristic("ci/lint", "SyntaxError: Unexpected token");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("code_bug");
-    expect(result!.errorType).toBe("js_error");
-  });
-
-  test("classifies compilation error as code_bug", () => {
-    const result = classifyByHeuristic("ci/build", "Compilation error in module");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("code_bug");
-    expect(result!.errorType).toBe("compilation_error");
-  });
-
-  test("classifies missing import as code_bug", () => {
-    const result = classifyByHeuristic("ci/build", "Cannot find module '@foo/bar'");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("code_bug");
-    expect(result!.errorType).toBe("import_error");
-  });
-
-  test("classifies type assignment error as code_bug", () => {
-    const result = classifyByHeuristic("ci/build", "type 'string' is not assignable to type 'number'");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("code_bug");
-    expect(result!.errorType).toBe("type_error");
-  });
-
-  test("classifies assertion failure as code_bug", () => {
-    const result = classifyByHeuristic("ci/tests", "expected 42 but received undefined");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("code_bug");
-    expect(result!.errorType).toBe("assertion_failure");
+    expect(result).toBeNull();
   });
 
   test("returns null for unrecognized output", () => {
     const result = classifyByHeuristic("ci/tests", "Everything passed with warnings");
     expect(result).toBeNull();
-  });
-
-  test("flake patterns take priority over bug patterns", () => {
-    // This output contains both timeout (flake) and SyntaxError (bug)
-    const result = classifyByHeuristic("ci/tests", "Test timed out\nSyntaxError: foo");
-    expect(result).not.toBeNull();
-    expect(result!.category).toBe("infra_flake");
   });
 
   test("includes matched pattern in result", () => {

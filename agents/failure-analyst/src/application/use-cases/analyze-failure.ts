@@ -46,106 +46,79 @@ export class AnalyzeFailure {
       return [];
     }
 
-    // 3. Try heuristic classification first
-    const heuristicResults: Map<number, FailureAnalysis> = new Map();
-    const needsLlm: CheckRun[] = [];
-
+    // 3. Run heuristics to build hints — passed to the LLM as signals, not hard answers
+    const heuristicHints = new Map<number, ReturnType<typeof classifyByHeuristic>>();
     for (const check of failedChecks) {
       const output = [check.output.title, check.output.summary, check.output.text]
         .filter(Boolean)
         .join("\n\n");
-
-      const heuristic = classifyByHeuristic(check.name, output);
-      if (heuristic) {
-        const retryCount = this.retryTracker.getCount(
-          this.makeTrackerKey(owner, repo, pr.number, check.name, headSha)
-        );
-        const decision = mapCategoryToDecision({
-          category: heuristic.category,
-          retryCount,
-          maxRetries: this.maxRetries,
-        });
-
-        heuristicResults.set(check.id, {
-          checkRunId: check.id,
-          checkName: check.name,
-          category: heuristic.category,
-          decision,
-          signature: {
-            checkName: check.name,
-            errorType: heuristic.errorType,
-            errorPattern: heuristic.errorPattern,
-            category: heuristic.category,
-            confidence: heuristic.confidence,
-          },
-          reasoning: `Heuristic match: ${heuristic.errorType} (${heuristic.errorPattern})`,
-        });
-      } else {
-        needsLlm.push(check);
-      }
+      const hint = classifyByHeuristic(check.name, output);
+      if (hint) heuristicHints.set(check.id, hint);
     }
 
-    // 4. Call ClassifierLlmPort for unclassified checks
-    if (needsLlm.length > 0) {
-      const contexts: ClassificationContext[] = await Promise.all(
-        needsLlm.map(async (check) => {
-          const [annotations, log] = await Promise.all([
-            this.github.getCheckRunAnnotations(owner, repo, check.id),
-            this.github.getCheckRunLog(owner, repo, check.id),
-          ]);
+    // 4. Always call the LLM for every failed check.
+    //    Heuristic hints are threaded into the prompt so the LLM can confirm or override.
+    const contexts: ClassificationContext[] = await Promise.all(
+      failedChecks.map(async (check) => {
+        const [annotations, log] = await Promise.all([
+          this.github.getCheckRunAnnotations(owner, repo, check.id),
+          this.github.getCheckRunLog(owner, repo, check.id),
+        ]);
 
-          const checkOutput = [check.output.title, check.output.summary, check.output.text]
-            .filter(Boolean)
-            .join("\n\n");
+        const checkOutput = [check.output.title, check.output.summary, check.output.text]
+          .filter(Boolean)
+          .join("\n\n");
 
-          return {
-            checkName: check.name,
-            checkRunId: check.id,
-            checkOutput: [checkOutput, annotations].filter(Boolean).join("\n\n"),
-            checkLog: log,
-            prTitle: pr.title,
-            prBody: pr.body,
-          };
-        })
+        return {
+          checkName: check.name,
+          checkRunId: check.id,
+          checkOutput: [checkOutput, annotations].filter(Boolean).join("\n\n"),
+          checkLog: log,
+          prTitle: pr.title,
+          prBody: pr.body,
+          heuristicHint: heuristicHints.get(check.id) ?? null,
+        };
+      })
+    );
+
+    const llmResults = await this.classifierLlm.classifyFailures(contexts);
+
+    const analysisResults: Map<number, FailureAnalysis> = new Map();
+
+    for (const result of llmResults) {
+      const check = failedChecks.find((c) => c.id === result.checkRunId);
+      if (!check) continue;
+
+      const category = shouldTrustLlmClassification(result.confidence)
+        ? result.category
+        : "unknown";
+
+      const retryCount = this.retryTracker.getCount(
+        this.makeTrackerKey(owner, repo, pr.number, check.name, headSha)
       );
+      const decision = mapCategoryToDecision({
+        category,
+        retryCount,
+        maxRetries: this.maxRetries,
+      });
 
-      const llmResults = await this.classifierLlm.classifyFailures(contexts);
-
-      for (const result of llmResults) {
-        const check = needsLlm.find((c) => c.id === result.checkRunId);
-        if (!check) continue;
-
-        const category = shouldTrustLlmClassification(result.confidence)
-          ? result.category
-          : "unknown";
-
-        const retryCount = this.retryTracker.getCount(
-          this.makeTrackerKey(owner, repo, pr.number, check.name, headSha)
-        );
-        const decision = mapCategoryToDecision({
-          category,
-          retryCount,
-          maxRetries: this.maxRetries,
-        });
-
-        heuristicResults.set(check.id, {
-          checkRunId: check.id,
+      analysisResults.set(check.id, {
+        checkRunId: check.id,
+        checkName: check.name,
+        category,
+        decision,
+        signature: {
           checkName: check.name,
+          errorType: result.errorType,
+          errorPattern: result.errorPattern,
           category,
-          decision,
-          signature: {
-            checkName: check.name,
-            errorType: result.errorType,
-            errorPattern: result.errorPattern,
-            category,
-            confidence: result.confidence,
-          },
-          reasoning: result.reasoning,
-        });
-      }
+          confidence: result.confidence,
+        },
+        reasoning: result.reasoning,
+      });
     }
 
-    const analyses = Array.from(heuristicResults.values());
+    const analyses = Array.from(analysisResults.values());
 
     // 5. Execute immediate actions + emit results
     for (const analysis of analyses) {

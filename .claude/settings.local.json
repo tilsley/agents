@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(gh api:*)",
+      "Bash(bun install:*)",
+      "Bash(bun add:*)",
+      "Bash(bun test:*)",
+      "WebFetch(domain:www.inngest.com)",
+      "WebFetch(domain:agentkit.inngest.com)",
+      "Bash(ls:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(bun run:*)",
+      "Bash(rm:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "Bash(grep:*)",
+      "Bash(grep error TS:*)",
+      "Bash(chmod +x:*)"
+    ]
+  }
+}

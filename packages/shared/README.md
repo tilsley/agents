@@ -4,38 +4,95 @@ Shared domain entities, application ports, and utility types for the multi-agent
 
 ## Purpose
 
-This package is the common dependency for all agents and apps in the monorepo. It prevents duplication of core interfaces and entities that multiple packages need.
+This package is the common dependency for all agents and apps in the monorepo. It provides the stable interfaces that agents are written against, so each agent can be developed and tested independently while still speaking the same language at the boundaries.
 
-## What Will Live Here
+## What's Exported
 
-Extractions from `agents/reviewer-agent/` (the prototype) and new shared abstractions:
+### Domain Entities
 
-**Domain entities** — `PullRequest`, `CheckRun`, `ReviewResult`, `FailureSignature`, `Lesson`
+| Export | Description |
+|---|---|
+| `PullRequest` | `owner, repo, number, title, body, author` |
+| `CheckRun` | `id, name, status, conclusion, headSha, output` |
+| `CheckRunOutput` | `title, summary, text` (all nullable) |
+| `FailureSignature` | `checkName, errorType, errorPattern, category, confidence` — structured CI failure descriptor |
+| `FailureCategory` | `"code_bug" \| "infra_flake" \| "unknown"` |
+| `ReviewChecklist` | `taskType, items: ChecklistItem[]` — task-specific review criteria |
+| `ChecklistItem` | `id, label, description, weight` |
+| `Lesson` | `problem, solution, context, outcome, tags, metadata` — RAG-storable lesson learned |
+| `PipelineContext` | Full context of a pipeline run (PR, checks, signatures, diff, lessons) |
 
-**Application ports** — `GitHubPort`, `LlmPort`, `RagPort` (interfaces that adapters implement)
+### Domain Utils
 
-**Utility types** — `Result<T, E>`, branded ID types, common value objects
+| Export | Description |
+|---|---|
+| `truncateLog(text, opts)` | Head+tail truncation for long CI logs. Defaults: 3000 chars, 33% head, 67% tail. |
+| `TruncateLogOptions` | `maxLength?, headRatio?, separator?` |
+| `ok(value)` | Constructs a `Result<T, never>` success value |
+| `err(error)` | Constructs a `Result<never, E>` failure value |
+| `Result<T, E>` | Discriminated union: `{ ok: true; value: T } \| { ok: false; error: E }` |
 
-## Migration Strategy
+### Application Ports
 
-1. Identify stable interfaces in `reviewer-agent` that other agents will need.
-2. Copy (not move) them here with any necessary generalization.
-3. New agents depend on `@tilsley/shared` from day one.
-4. Once the new agents are proven, update `reviewer-agent` to consume shared types.
-5. Remove duplicated definitions from `reviewer-agent`.
+| Port | Description |
+|---|---|
+| `GitHubPort` | Full GitHub operations interface: fetch PR, check runs, annotations, logs, rerun, close, diff, comment, approve, request-changes, merge |
+| `ChatCompletionPort` | Low-level LLM abstraction: `complete(messages: ChatMessage[]) → string` |
+| `ChatMessage` | `{ role: "system" \| "user" \| "assistant"; content: string }` |
+| `RagPort` | `query(text, opts?) → RagDocument[]` and `upsert(docs)` |
+| `RagDocument` | `{ id, content, metadata }` |
+| `RagQueryOptions` | `limit?, threshold?, filter?` |
+| `EventBufferPort<T>` | Debounce buffer: `add(event, handler)` / `dispose()` |
 
-This is intentionally gradual — `reviewer-agent` has 107 passing tests and stays untouched until migration is safe.
+### Types
+
+| Export | Description |
+|---|---|
+| `PipelineEvent` | `{ type, payload, timestamp, correlationId }` — the event bus currency |
+| `AgentTask` | `{ taskId, type, payload }` — what the conductor dispatches to agents |
+| `AgentResult` | `{ taskId, status: "success" \| "failure" \| "skipped", output }` |
 
 ## Directory Structure
 
 ```
 src/
-├── index.ts                 # barrel export
+├── index.ts                          # barrel export (all public API)
 ├── domain/
-│   ├── entities/            # shared domain entities
-│   ├── policies/            # shared policy interfaces
-│   └── utils/               # domain-level utilities
+│   ├── entities/
+│   │   ├── pull-request.ts
+│   │   ├── check-run.ts
+│   │   ├── failure-signature.ts
+│   │   ├── review-checklist.ts
+│   │   ├── lesson.ts
+│   │   └── pipeline-context.ts
+│   └── utils/
+│       ├── truncate-log.ts
+│       └── result.ts
 ├── application/
-│   └── ports/               # shared port interfaces
-└── types/                   # utility types, branded IDs
+│   └── ports/
+│       ├── github.port.ts
+│       ├── llm.port.ts
+│       ├── rag.port.ts
+│       └── event-buffer.port.ts
+└── types/
+    ├── pipeline-event.ts
+    ├── agent-task.ts
+    └── agent-result.ts
+
+test/
+└── domain/
+    ├── truncate-log.test.ts   (7 tests)
+    └── result.test.ts         (6 tests)
 ```
+
+## Tests
+
+```bash
+bun test packages/shared/
+```
+
+13 tests — `truncateLog` edge cases (head/tail ratio, custom separator, realistic error preservation) and `Result<T,E>` type narrowing.
+
+## Migration Note
+
+`agents/reviewer-agent/` predates this package and maintains its own copies of `PullRequest`, `CheckRun`, `GitHubPort`, `truncateLog`, and `EventBufferPort`. The new agents (`failure-analyst`, `review-agent`, `distiller`) depend on `@tilsley/shared` from day one. Migration of the legacy reviewer-agent is deferred until the new architecture is proven in production.

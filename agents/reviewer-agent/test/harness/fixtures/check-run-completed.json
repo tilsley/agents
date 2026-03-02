@@ -1,0 +1,48 @@
+{
+  "action": "completed",
+  "check_run": {
+    "id": 123456789,
+    "name": "ci/tests",
+    "head_sha": "abc123def456",
+    "status": "completed",
+    "conclusion": "failure",
+    "output": {
+      "title": "Test suite failed",
+      "summary": "2 out of 150 tests failed",
+      "text": "FAIL src/utils/date.test.ts\n  ● formatDate › should handle timezone edge case\n    Expected: \"2024-01-01T00:00:00Z\"\n    Received: \"2023-12-31T23:59:59Z\"\n\nFAIL src/api/health.test.ts\n  ● GET /health › should return 200\n    Timeout - Async callback was not invoked within 5000ms"
+    },
+    "check_suite": {
+      "id": 987654321
+    },
+    "app": {
+      "id": 1,
+      "slug": "github-actions"
+    },
+    "pull_requests": [
+      {
+        "url": "https://api.github.com/repos/test-org/test-repo/pulls/42",
+        "id": 1,
+        "number": 42,
+        "head": {
+          "ref": "bot/update-deps",
+          "sha": "abc123def456"
+        },
+        "base": {
+          "ref": "main",
+          "sha": "def789abc012"
+        }
+      }
+    ]
+  },
+  "repository": {
+    "id": 12345,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": {
+      "login": "test-org"
+    }
+  },
+  "sender": {
+    "login": "github-actions[bot]"
+  }
+}

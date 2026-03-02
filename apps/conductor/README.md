@@ -149,26 +149,116 @@ Inngest is a single Go binary. Run `inngest start` and it launches all services 
 
 Licensed under SSPL (free for internal use, not for offering as a service).
 
-## Clean Architecture Structure
+## Implemented Structure
 
 ```
 src/
-├── main.ts                          # entry point
+├── main.ts
 ├── domain/
-│   ├── entities/                    # pipeline state, agent task descriptors
-│   ├── policies/                    # routing rules, retry policies
-│   └── utils/
+│   ├── entities/
+│   │   ├── pipeline-run.ts          # PipelineRun, PipelineStage, PipelineStageEntry
+│   │   └── agent-assignment.ts      # AgentAssignment, AgentType
+│   └── policies/
+│       ├── routing-policy.ts        # event type → agent type mapping
+│       └── timeout-policy.ts        # per-agent timeout thresholds
 ├── application/
 │   ├── ports/
-│   │   └── orchestrator.port.ts     # event bus abstraction
-│   └── use-cases/                   # route event → agent, handle completion
-└── adapters/                        # Inngest adapter (or DIY)
+│   │   └── orchestrator.port.ts     # OrchestratorPort: emit, on, off
+│   └── use-cases/
+│       ├── handle-webhook.ts        # parse GitHub webhook → PipelineEvent
+│       ├── route-event.ts           # subscribe to events → dispatch to agents
+│       └── handle-agent-completion.ts  # agent done → next pipeline stage
+└── adapters/
+    ├── orchestrator/
+    │   └── in-memory-orchestrator.adapter.ts  # Map<type, Set<handler>> event bus
+    ├── http/
+    │   └── webhook.server.ts        # Hono + @octokit/webhooks signature validation
+    └── github/
+        └── github.adapter.ts        # Octokit implementation of GitHubPort
+
+test/
+├── domain/
+│   ├── routing-policy.test.ts       (10 tests)
+│   └── timeout-policy.test.ts       (5 tests)
+├── use-cases/
+│   ├── handle-webhook.test.ts       (8 tests)
+│   ├── route-event.test.ts          (8 tests)
+│   └── handle-agent-completion.test.ts  (10 tests)
+└── adapters/
+    ├── in-memory-orchestrator.test.ts   (10 tests)
+    └── webhook-server.test.ts           (5 tests — includes signature verification)
 ```
 
-## Next Steps
+## Domain Entities
 
-1. Define the full `OrchestratorPort` interface (subscribe, schedule, waitForEvent).
-2. Implement `InMemoryOrchestratorAdapter` for testing.
-3. Build the first pipeline: `check_run.completed` → failure-analyst → rerun/close.
-4. Integrate Inngest SDK and implement `InngestAdapter`.
-5. Swap to Inngest adapter for production.
+**`PipelineRun`** — tracks a pipeline through its stages:
+```ts
+type PipelineStage = "pending" | "failure_analysis" | "review" | "distillation" | "completed" | "failed"
+```
+
+**`AgentAssignment`** — records which agent is handling a task:
+```ts
+type AgentType = "failure-analyst" | "review-agent" | "distiller"
+```
+
+## Routing Policy
+
+`getAgentForEvent(type)` maps event types to agents:
+
+| Event Type | Agent |
+|---|---|
+| `check_run.completed` | `failure-analyst` |
+| `failure-analysis.completed` | `review-agent` |
+| `review.completed` | `distiller` |
+
+## Timeout Policy
+
+Per-agent timeouts (configurable, used by `isTimedOut(assignedAt, agentType)`):
+
+| Agent | Timeout |
+|---|---|
+| `failure-analyst` | 2 minutes |
+| `review-agent` | 5 minutes |
+| `distiller` | 3 minutes |
+
+## Use Cases
+
+**`HandleWebhook`** — validates a parsed GitHub webhook payload, maps it to a `PipelineEvent` with `correlationId = "owner/repo:headSha"`, and emits it to the orchestrator. Ignores non-`check_run` events and non-`completed` actions.
+
+**`RouteEvent`** — calls `orchestrator.on(type, handler)` for all supported event types on `start()`. On each event, looks up the target `AgentType` via routing policy and calls the injected `AgentDispatcher` with a new `AgentTask`.
+
+**`HandleAgentCompletion`** — called when an agent signals it is done. On `status: "failure"`, emits `pipeline.failed`. On success, looks up the next stage event and emits it to advance the pipeline. Terminal events (`distillation.completed`) are treated as no-ops.
+
+## OrchestratorPort
+
+```ts
+interface OrchestratorPort {
+  emit(event: PipelineEvent): Promise<void>;
+  on(type: string, handler: EventHandler): void;
+  off(type: string, handler: EventHandler): void;
+}
+```
+
+**`InMemoryOrchestratorAdapter`** — `Map<string, Set<EventHandler>>`. Handlers run concurrently via `Promise.all`. Includes `getHandlerCount(type)` and `clear()` for test assertions.
+
+**Inngest adapter** — the next PR. Pure adapter swap. No domain or use-case changes required.
+
+## Webhook Server
+
+```ts
+createConductorWebhookServer({ webhookSecret, handleWebhook })
+```
+
+Routes:
+- `GET /health` → `{ status: "ok" }`
+- `POST /webhook` → validates `x-hub-signature-256`, parses payload, delegates to `HandleWebhook`
+
+Returns `{ status: "processing", eventType }` on success, `{ status: "ignored" }` for non-actionable events, `401` on invalid signature.
+
+## Tests
+
+```bash
+bun test --cwd apps/conductor
+```
+
+62 tests across 7 files.

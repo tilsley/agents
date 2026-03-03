@@ -22,7 +22,7 @@ flowchart TD
     GH -->|check_run.completed| W
 
     W -->|pull_request.opened| CS["Context Store\n(in-memory, no agent)"]
-    CS --> PCtx[(Pipeline Context\nowner · repo · prNumber\nprAuthor · prTitle · headSha)]
+    CS --> PCtx[(Pipeline Context\nowner · repo · prNumber\nprAuthor · prTitle · headSha\nlanguage)]
 
     W -->|check_run.passed\nsuccess / neutral / skipped| RA
 
@@ -147,8 +147,8 @@ Classifies CI check run failures and routes them to the right action.
 | Retry limit reached | Escalate regardless of category |
 
 **Classification approach:**
-1. **Heuristic hint** — 4 regex patterns for unambiguous infra signals (`ETIMEDOUT/ECONNRESET/ECONNREFUSED`, `rate limit`, `socket hang up`, `ENOMEM`). If matched, the result is injected into the LLM prompt as a suggestion the LLM can confirm or override.
-2. **LLM always runs** — `ClassifierLlmPort` is called for every failed check with the full context: check output, annotations, logs, PR title, PR body, and the optional hint. Results below 60% confidence are downgraded to `unknown`.
+1. **Heuristic hint** — base regex patterns for unambiguous infra signals (`ETIMEDOUT/ECONNRESET/ECONNREFUSED`, `rate limit`, `socket hang up`, `ENOMEM`) plus language-specific patterns (`SocketTimeoutException`/`ConnectException` for Java; `i/o timeout`/`connection refused` for Go). If matched, the result is injected into the LLM prompt as a suggestion the LLM can confirm or override.
+2. **LLM always runs** — `ClassifierLlmPort` is called for every failed check with the full context: check output, annotations, logs, PR title, PR body, detected language, and the optional hint. Results below 60% confidence are downgraded to `unknown`.
 
 The LLM bypassed-by-heuristic approach was dropped because patterns like `timeout` are ambiguous — a performance regression looks identical to an infra flake at the regex level. Giving the LLM the hint as context (rather than as a hard answer) keeps the speed benefit for obvious cases without locking in wrong classifications.
 
@@ -286,7 +286,7 @@ All agents are written against interfaces in `@tilsley/shared`. A new agent impo
 | Entities | `PullRequest`, `CheckRun`, `FailureSignature`, `ReviewChecklist`, `Lesson`, `PipelineContext` |
 | Ports | `GitHubPort`, `ChatCompletionPort`, `MemoryPort`, `EventBufferPort` |
 | Events | `PipelineEvent`, `AgentTask`, `AgentResult` |
-| Utils | `Result<T,E>`, `truncateLog()` |
+| Utils | `Result<T,E>`, `truncateLog()`, `detectLanguage(diff)` |
 
 ---
 

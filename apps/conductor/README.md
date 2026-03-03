@@ -235,6 +235,20 @@ Per-agent timeouts (configurable, used by `isTimedOut(assignedAt, agentType)`):
 | `review-agent` | 5 minutes |
 | `distiller` | 3 minutes |
 
+## Pipeline Context
+
+`main.ts` accumulates shared state in a `Map<correlationId, PipelineContext>`:
+
+| Field | Set by | Used by |
+|---|---|---|
+| `owner`, `repo`, `headSha` | context-store | all stages |
+| `prNumber`, `prAuthor`, `prTitle` | context-store | review-agent, distiller |
+| `language` | context-store (via `detectLanguage(diff)`) | failure-analyst |
+| `failureSignatures`, `failureDecisions` | failure-analyst | review-agent (advisory mode) |
+| `reviewScore`, `reviewDecision`, `reviewFeedback` | review-agent | distiller |
+
+**Language detection** — when `pull_request.opened` fires, the conductor fetches the PR diff via `GitHubPort.getPullRequestDiff()` and calls `detectLanguage(diff)` from `@tilsley/shared`. The dominant language (or `null`) is stored in `PipelineContext.language` and passed to `AnalyzeFailure` when a `check_run.failed` event arrives for the same `headSha`.
+
 ## Use Cases
 
 **`HandleWebhook`** — validates a parsed GitHub webhook payload, maps it to a `PipelineEvent` with `correlationId = "owner/repo:headSha"`, and emits it to the orchestrator. Ignores non-`check_run` events and non-`completed` actions.

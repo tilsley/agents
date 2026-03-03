@@ -28,6 +28,7 @@ This package is the common dependency for all agents and apps in the monorepo. I
 |---|---|
 | `truncateLog(text, opts)` | Head+tail truncation for long CI logs. Defaults: 3000 chars, 33% head, 67% tail. |
 | `TruncateLogOptions` | `maxLength?, headRatio?, separator?` |
+| `detectLanguage(diff)` | Parses `diff --git` headers, tallies file-extension counts, returns the dominant language string or `null`. Supports: `typescript`, `javascript`, `java`, `kotlin`, `go`, `python`, `ruby`, `rust`, `csharp`, `cpp`, `c`, `php`, `swift`. |
 | `ok(value)` | Constructs a `Result<T, never>` success value |
 | `err(error)` | Constructs a `Result<never, E>` failure value |
 | `Result<T, E>` | Discriminated union: `{ ok: true; value: T } \| { ok: false; error: E }` |
@@ -64,6 +65,7 @@ src/
 │   │   └── pipeline-context.ts
 │   └── utils/
 │       ├── truncate-log.ts
+│       ├── detect-language.ts        # detectLanguage(diff) → dominant language or null
 │       └── result.ts
 ├── application/
 │   └── ports/
@@ -77,8 +79,9 @@ src/
 
 test/
 └── domain/
-    ├── truncate-log.test.ts   (7 tests)
-    └── result.test.ts         (6 tests)
+    ├── truncate-log.test.ts      (7 tests)
+    ├── result.test.ts            (6 tests)
+    └── detect-language.test.ts   (11 tests)
 ```
 
 ## Tests
@@ -87,7 +90,7 @@ test/
 bun test packages/shared/
 ```
 
-13 tests — `truncateLog` edge cases (head/tail ratio, custom separator, realistic error preservation) and `Result<T,E>` type narrowing.
+24 tests — `truncateLog` edge cases, `Result<T,E>` type narrowing, and `detectLanguage` coverage (per-language mapping, dominant-language selection, mixed diffs, null on no match).
 
 ## Migration Note
 

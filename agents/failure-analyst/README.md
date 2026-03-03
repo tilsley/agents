@@ -35,6 +35,8 @@ Patterns like `timeout` are ambiguous: a test suite timing out from a performanc
 
 **Heuristic hint patterns** (infra flake, confidence 0.85):
 
+Base patterns (all languages):
+
 | Pattern | Error type |
 |---|---|
 | `ETIMEDOUT \| ECONNRESET \| ECONNREFUSED` | `network_error` |
@@ -42,10 +44,28 @@ Patterns like `timeout` are ambiguous: a test suite timing out from a performanc
 | `socket hang up` | `socket_hangup` |
 | `ENOMEM` | `oom` |
 
+Language-specific patterns (merged when `language` is set on the input):
+
+| Language | Pattern | Error type |
+|---|---|---|
+| `java` | `SocketTimeoutException \| ConnectException` | `network_timeout` |
+| `go` | `i/o timeout` | `io_timeout` |
+| `go` | `connection refused` | `connection_refused` |
+
 When matched, the LLM prompt includes:
 > **Pattern hint:** regex matched `network_error` — suggests `infra_flake`. Confirm or override based on full context.
 
 All other patterns (TypeErrors, assertion failures, compilation errors, timeouts) are intentionally left to the LLM — they have too many false-positive edge cases for regex to be reliable.
+
+## Language-Aware Analysis
+
+The conductor detects the dominant language of a PR at `pull_request.opened` time (via `detectLanguage(diff)` from `@tilsley/shared`) and stores it in `PipelineContext`. It is passed to `AnalyzeFailure` as `language?: string | null`.
+
+When `language` is set it affects three stages:
+
+1. **Heuristic hints** — language-specific flake patterns are appended to the base `FLAKE_PATTERNS` before scanning (`JAVA_FLAKE_PATTERNS`, `GO_FLAKE_PATTERNS`).
+2. **Log extraction** — `extractErrorLines` merges language-specific `ERROR_PATTERNS` at runtime (`JAVA_PATTERNS`, `GO_PATTERNS`) so Java `BUILD FAILURE` / `[ERROR]` and Go `panic:` / `--- FAIL:` / `goroutine` lines are captured alongside the JS/TS base patterns.
+3. **LLM prompt** — a `> **Language:** <lang>` line is prepended to the user message; the system prompt includes per-language error keyword guidance (e.g. `NullPointerException`, `Caused by` for Java; `panic`, `--- FAIL` for Go).
 
 ## Directory Structure
 
@@ -55,9 +75,10 @@ src/
 │   ├── entities/
 │   │   └── failure-analysis.ts      # FailureAnalysis, FailureDecision
 │   ├── policies/
-│   │   ├── classification-policy.ts # classifyByHeuristic(), mapCategoryToDecision(), LLM_CONFIDENCE_THRESHOLD
+│   │   ├── classification-policy.ts # classifyByHeuristic(name, output, language?), language-specific flake patterns
 │   │   └── retry-policy.ts          # shouldEscalateRetry(count, max)
 │   └── utils/
+│       ├── extract-error-lines.ts   # extractErrorLines(log, { language? }) — JS/TS + Java/Go pattern sets
 │       └── format-failure-report.ts # markdown report for logging/comments
 ├── application/
 │   ├── ports/
@@ -67,13 +88,14 @@ src/
 │       └── analyze-failure.ts       # AnalyzeFailure — main use case
 └── adapters/
     ├── llm/
-    │   └── copilot-classifier.adapter.ts  # ChatCompletionPort → ClassifierLlmPort
+    │   └── copilot-classifier.adapter.ts  # ChatCompletionPort → ClassifierLlmPort (injects language line + system guidance)
     └── state/
         └── in-memory-retry-tracker.ts     # RetryTrackerPort — TTL-based retry count store
 
 test/
 ├── domain/
 │   ├── classification-policy.test.ts  (hints-only patterns + decision matrix)
+│   ├── extract-error-lines.test.ts    (base patterns, Java/Go language patterns, context windows)
 │   ├── retry-policy.test.ts
 │   └── format-failure-report.test.ts
 ├── use-cases/
@@ -87,6 +109,14 @@ test/
 
 ```ts
 type FailureDecision = "retry" | "route_to_fixer" | "escalate" | "skip"
+
+interface AnalyzeFailureInput {
+  owner: string;
+  repo: string;
+  headSha: string;
+  checkRuns: CheckRun[];
+  language?: string | null;   // detected by conductor at pull_request.opened time
+}
 
 interface FailureAnalysis {
   checkRunId: number;
@@ -105,6 +135,7 @@ interface ClassificationContext {
   prTitle: string;
   prBody: string;
   heuristicHint?: { category: FailureCategory; errorType: string } | null;
+  language?: string | null;   // forwarded to LLM prompt
 }
 ```
 

@@ -28,12 +28,12 @@ bun test --recursive # run all tests across the monorepo
 | Package | Source Files | Tests | Status |
 |---|---|---|---|
 | `reviewer-agent` | 21 | 107 | Operational (legacy prototype) |
-| `@tilsley/shared` | 15 | 13 | Implemented |
+| `@tilsley/shared` | 16 | 24 | Implemented |
 | `@tilsley/conductor` | 11 | 74 | Implemented |
-| `@tilsley/failure-analyst` | 9 | 61 | Implemented |
+| `@tilsley/failure-analyst` | 10 | 66 | Implemented |
 | `@tilsley/review-agent` | 11 | 62 | Implemented |
 | `@tilsley/distiller` | 9 | 51 | Implemented |
-| **Total** | **76** | **368** | |
+| **Total** | **78** | **384** | |
 
 ## Pipeline Flow
 
@@ -132,7 +132,7 @@ InMemoryOrchestratorAdapter
 
 **Lesson memory is file-based.** Lessons are persisted as markdown files via `MarkdownMemoryAdapter` (implements `MemoryPort`). The review agent loads relevant lessons at review time via `KnowledgePort` (backed by `InMemoryKnowledgeAdapter` in tests).
 
-**Heuristic-first classification.** The failure analyst tries 20 regex patterns (ETIMEDOUT, TypeError, SyntaxError, rate limit, etc.) before calling the LLM. LLM results below `confidence < 0.6` are downgraded to `unknown`.
+**Language-aware classification.** The conductor detects the dominant language of a PR diff at `pull_request.opened` time and stores it in `PipelineContext`. The failure analyst receives this and uses it to expand heuristic patterns (e.g. `SocketTimeoutException` for Java, `i/o timeout` for Go) and log extraction patterns (e.g. `BUILD FAILURE`, `Caused by:` for Java; `panic:`, `goroutine` for Go). The language is also injected into the LLM prompt. LLM results below `confidence < 0.6` are downgraded to `unknown`.
 
 **`Result<T, E>` type.** The shared package provides a discriminated union result type (`ok(value)` / `err(error)`) for use cases that need to propagate errors without throwing.
 

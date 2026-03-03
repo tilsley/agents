@@ -111,7 +111,7 @@ The orchestration hub. It has no domain logic of its own — it wires the other 
 - Receives GitHub webhooks (Hono HTTP server, `@octokit/webhooks` signature validation)
 - Emits `PipelineEvent`s onto the internal event bus (`OrchestratorPort`)
 - Routes events to agent use-cases via `RouteEvent` + `AgentDispatcher`
-- Accumulates pipeline context across stages in a `Map<correlationId, PipelineContext>`
+- Accumulates pipeline context across stages in a `Map<correlationId, PipelineContext>` (including failure decisions for advisory mode)
 - Exposes an HTTP API for the UI (`POST /api/runs`, `GET /api/runs/:id/stream` SSE, `GET/PUT /api/memory/:repo`)
 
 **Key files:**
@@ -119,6 +119,7 @@ The orchestration hub. It has no domain logic of its own — it wires the other 
 apps/conductor/src/
   main.ts                                  ← wires everything; AgentDispatcher fn
   domain/policies/routing-policy.ts        ← event → agent mapping
+  domain/policies/review-mode-policy.ts    ← FailureDecision[] → advisory/full mode
   application/use-cases/
     handle-webhook.ts                      ← splits check_run into passed/failed
     route-event.ts                         ← subscribes to events, calls dispatch
@@ -175,18 +176,19 @@ Scores a PR against a dynamic checklist and posts a GitHub review.
 - Each checklist item scored 0–100 by LLM
 - Weighted average → overall score
 - Thresholds: approve ≥ 80, request_changes ≤ 40, comment in between
+- **Advisory mode**: when the conductor detects a genuine CI failure (`route_to_fixer` or `escalate`), the decision is forced to `request_changes` regardless of score. A banner is prepended to the GitHub comment. Code quality feedback is still provided.
 
 **Checklist selection:**
 - Checklist is selected dynamically by `getChecklist(prAuthor, prTitle)` in the conductor
 - Patch-agent PRs (`prAuthor = "chore-bot"`) get the security patch checklist
 - Other bots get a bot-PR checklist; humans get a general checklist
 
-**RAG context:**
+**Lesson context:**
 - Loads relevant lessons from the lesson store filtered by repo + task type
 - Loads past reviews of the same task type
 - Both are injected into the LLM prompt to inform scoring
 
-**Emits:** `review.completed` with `{ prNumber, result: { overallScore, decision, checklistScores } }`.
+**Emits:** `review.completed` with `{ prNumber, result: { overallScore, decision, checklistScores, mode, advisoryReason? } }`.
 
 **Key files:**
 ```
@@ -196,7 +198,7 @@ agents/review-agent/src/
   application/use-cases/evaluate-pr.ts
   adapters/
     llm/copilot-reviewer.adapter.ts
-    rag/in-memory-rag.adapter.ts
+    memory/in-memory-knowledge.adapter.ts
 ```
 
 ---
@@ -282,7 +284,7 @@ All agents are written against interfaces in `@tilsley/shared`. A new agent impo
 | Category | Exports |
 |---|---|
 | Entities | `PullRequest`, `CheckRun`, `FailureSignature`, `ReviewChecklist`, `Lesson`, `PipelineContext` |
-| Ports | `GitHubPort`, `ChatCompletionPort`, `RagPort`, `MemoryPort`, `EventBufferPort` |
+| Ports | `GitHubPort`, `ChatCompletionPort`, `MemoryPort`, `EventBufferPort` |
 | Events | `PipelineEvent`, `AgentTask`, `AgentResult` |
 | Utils | `Result<T,E>`, `truncateLog()` |
 
@@ -313,7 +315,7 @@ To implement a similar system:
 1. **Define your event types** in a shared package. Events are the contract between agents — nail these first.
 2. **One use-case per agent action.** `AnalyzeFailure`, `EvaluatePr`, `DistillLessons`, `PatchVulnerabilities` — each is a plain class with typed input/output.
 3. **Ports for everything external.** LLM, GitHub, storage, git — all behind interfaces. This is what makes tests fast and adapters swappable.
-4. **The conductor is just a router.** It doesn't make decisions — it maps event types to agent use-cases and threads context across stages.
+4. **The conductor is just a router.** It maps event types to agent use-cases and threads context across stages. Its only decision logic is the `deriveReviewMode` policy, which reads failure-analyst decisions and tells the review agent whether to run in advisory mode.
 5. **Deterministic policies as hints, not gatekeepers.** Severity filters and semver checks are hard rules (domain layer, no LLM). Regex heuristics are hints — pass them to the LLM as context rather than bypassing the LLM entirely. A pattern like `timeout` looks the same whether it's infra or a performance regression you just introduced; the LLM has the PR diff and title to tell them apart.
 6. **Lessons are facts, not chat history.** The distiller extracts structured `{ problem, solution, context, outcome }` facts. These are injected into future agent prompts as grounded context.
 

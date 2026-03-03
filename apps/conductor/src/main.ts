@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
 import type { CheckRun, FailureSignature, PullRequest } from "@tilsley/shared";
+import { detectLanguage } from "@tilsley/shared";
 
 // Conductor adapters
 import { GitHubAdapter } from "./adapters/github/github.adapter";
@@ -20,10 +21,12 @@ import { RouteEvent, type AgentDispatcher } from "./application/use-cases/route-
 import type { AgentType } from "./domain/entities/agent-assignment";
 import { getChecklist } from "./domain/policies/checklist-policy";
 import { getDistillationFocus } from "./domain/policies/distillation-focus-policy";
+import { deriveReviewMode } from "./domain/policies/review-mode-policy";
 import type { AgentTask } from "@tilsley/shared";
 
 // Failure Analyst
 import { AnalyzeFailure } from "@tilsley/failure-analyst/src/application/use-cases/analyze-failure";
+import type { FailureDecision } from "@tilsley/failure-analyst/src/domain/entities/failure-analysis";
 import { CopilotClassifierAdapter } from "@tilsley/failure-analyst/src/adapters/llm/copilot-classifier.adapter";
 import { InMemoryRetryTracker } from "@tilsley/failure-analyst/src/adapters/state/in-memory-retry-tracker";
 
@@ -107,10 +110,12 @@ interface PipelineContext {
   taskType?: string;
   pr?: PullRequest;
   failureSignatures: FailureSignature[];
+  failureDecisions: FailureDecision[];
   reviewScore?: number;
   reviewDecision?: string;
   reviewFeedback?: string;
   diff?: string;
+  language?: string | null;
 }
 
 const pipelineContexts = new Map<string, PipelineContext>();
@@ -144,6 +149,11 @@ const dispatch: AgentDispatcher = async (
       const prAuthor = (payload.prAuthor as string | undefined) ?? "";
       const prTitle = (payload.prTitle as string | undefined) ?? "";
 
+      const diff = prNumber
+        ? await github.getPullRequestDiff(owner, repo, prNumber).catch(() => "")
+        : "";
+      const language = detectLanguage(diff);
+
       pipelineContexts.set(correlationId, {
         owner,
         repo,
@@ -151,11 +161,13 @@ const dispatch: AgentDispatcher = async (
         prNumber,
         prAuthor,
         prTitle,
+        language,
         failureSignatures: [],
+        failureDecisions: [],
       });
 
       console.log(
-        `[conductor:context-store] Stored PR context for ${correlationId} (PR #${prNumber} by ${prAuthor})`
+        `[conductor:context-store] Stored PR context for ${correlationId} (PR #${prNumber} by ${prAuthor}, language: ${language ?? "unknown"})`
       );
     } else if (agentType === "failure-analyst") {
       const owner = payload.owner as string;
@@ -164,7 +176,7 @@ const dispatch: AgentDispatcher = async (
       const checkRun = payload.checkRun as CheckRun;
 
       // Merge into existing context (set by context-store on pull_request.opened)
-      // so we keep prAuthor/prTitle if they arrived first.
+      // so we keep prAuthor/prTitle/language if they arrived first.
       const existing = pipelineContexts.get(correlationId);
       pipelineContexts.set(correlationId, {
         owner,
@@ -173,7 +185,9 @@ const dispatch: AgentDispatcher = async (
         prAuthor: existing?.prAuthor,
         prTitle: existing?.prTitle,
         prNumber: existing?.prNumber,
+        language: existing?.language,
         failureSignatures: [],
+        failureDecisions: [],
       });
 
       const analyses = await analyzeFailure.execute({
@@ -181,11 +195,13 @@ const dispatch: AgentDispatcher = async (
         repo,
         headSha,
         checkRuns: [checkRun],
+        language: existing?.language ?? null,
       });
 
       const ctx = pipelineContexts.get(correlationId);
       if (ctx) {
         ctx.failureSignatures = analyses.map((a) => a.signature);
+        ctx.failureDecisions = analyses.map((a) => a.decision);
       }
     } else if (agentType === "review-agent") {
       const owner = payload.owner as string;
@@ -236,6 +252,7 @@ const dispatch: AgentDispatcher = async (
           prAuthor,
           prTitle,
           failureSignatures: [],
+          failureDecisions: [],
         });
       }
 
@@ -245,6 +262,9 @@ const dispatch: AgentDispatcher = async (
       if (ctx) ctx.taskType = checklist.taskType;
       else pipelineContexts.get(correlationId)!.taskType = checklist.taskType;
 
+      const pctx = pipelineContexts.get(correlationId)!;
+      const { mode: reviewMode, reason: advisoryReason } = deriveReviewMode(pctx.failureDecisions);
+
       const result = await evaluatePr.execute({
         owner,
         repo,
@@ -252,7 +272,9 @@ const dispatch: AgentDispatcher = async (
         headSha,
         checklist,
         correlationId,
-        failureSignatures: pipelineContexts.get(correlationId)?.failureSignatures,
+        failureSignatures: pctx.failureSignatures,
+        mode: reviewMode,
+        advisoryReason,
       });
 
       if (result) {

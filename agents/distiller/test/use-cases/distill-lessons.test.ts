@@ -88,29 +88,29 @@ function createMockConductor(): ConductorPort {
 
 describe("DistillLessons", () => {
   test("stores quality lessons via MemoryPort", async () => {
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(createMockSummarizer(), createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(createMockSummarizer(), createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 
     expect(result.storedCount).toBe(1);
-    expect(rag.replace).toHaveBeenCalledTimes(1);
+    expect(memory.replace).toHaveBeenCalledTimes(1);
   });
 
   test("filters out low-quality lessons", async () => {
     const summarizer = createMockSummarizer([
       makeLesson({ problem: "short", solution: "fix", tags: [] }),
     ]);
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(summarizer, createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(summarizer, createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 
     expect(result.storedCount).toBe(0);
     expect(result.filteredCount).toBe(1);
-    expect(rag.replace).not.toHaveBeenCalled();
+    expect(memory.replace).not.toHaveBeenCalled();
   });
 
   test("removes duplicate lessons", async () => {
@@ -118,9 +118,9 @@ describe("DistillLessons", () => {
       makeLesson(),
       makeLesson(), // exact duplicate
     ]);
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(summarizer, createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(summarizer, createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 
@@ -141,24 +141,24 @@ describe("DistillLessons", () => {
 
   test("handles empty lesson list from LLM", async () => {
     const summarizer = createMockSummarizer([]);
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(summarizer, createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(summarizer, createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 
     expect(result.storedCount).toBe(0);
     expect(result.lessons).toHaveLength(0);
-    expect(rag.replace).not.toHaveBeenCalled();
+    expect(memory.replace).not.toHaveBeenCalled();
   });
 
   test("excludes lessons with empty problem", async () => {
     const summarizer = createMockSummarizer([
       makeLesson({ problem: "" }),
     ]);
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(summarizer, createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(summarizer, createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 
@@ -191,9 +191,9 @@ describe("DistillLessons", () => {
       makeLesson({ problem: "Problem A is a longer description" }),
       makeLesson({ problem: "Problem B is another description" }),
     ]);
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(summarizer, createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(summarizer, createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 
@@ -218,9 +218,9 @@ describe("DistillLessons", () => {
       makeLesson(), // passes quality
       makeLesson({ problem: "short", solution: "s", tags: [] }), // fails: too short
     ]);
-    const rag = createMockMemory();
+    const memory = createMockMemory();
     const conductor = createMockConductor();
-    const useCase = new DistillLessons(summarizer, createMockConsolidator(), rag, conductor);
+    const useCase = new DistillLessons(summarizer, createMockConsolidator(), memory, conductor);
 
     const result = await useCase.execute(makeInput());
 

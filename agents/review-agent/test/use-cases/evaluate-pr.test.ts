@@ -274,4 +274,53 @@ describe("EvaluatePr", () => {
     const event = (conductor.emit as ReturnType<typeof mock>).mock.calls[0][0];
     expect(event.correlationId).toBe("my-corr");
   });
+
+  test("defaults to mode full when unspecified", async () => {
+    const github = createMockGitHub();
+    const useCase = new EvaluatePr(
+      github, createMockReviewerLlm(), createMockKnowledge(), createMockConductor()
+    );
+
+    const result = await useCase.execute(makeInput());
+
+    expect(result!.mode).toBe("full");
+    expect(result!.advisoryReason).toBeUndefined();
+  });
+
+  test("forces request_changes in advisory mode even with high scores", async () => {
+    const github = createMockGitHub();
+    const llm = createMockReviewerLlm([
+      { itemId: "quality", label: "Code Quality", score: 95, reasoning: "Excellent" },
+      { itemId: "tests", label: "Tests", score: 90, reasoning: "Great" },
+    ]);
+    const useCase = new EvaluatePr(
+      github, llm, createMockKnowledge(), createMockConductor()
+    );
+
+    const result = await useCase.execute(
+      makeInput({ mode: "advisory", advisoryReason: "CI detected a code bug" })
+    );
+
+    expect(result!.decision).toBe("request_changes");
+    expect(result!.mode).toBe("advisory");
+    expect(result!.advisoryReason).toBe("CI detected a code bug");
+    expect(github.requestChangesOnPullRequest).toHaveBeenCalledTimes(1);
+    expect(github.approvePullRequest).not.toHaveBeenCalled();
+  });
+
+  test("includes advisoryReason in emitted event result", async () => {
+    const github = createMockGitHub();
+    const conductor = createMockConductor();
+    const useCase = new EvaluatePr(
+      github, createMockReviewerLlm(), createMockKnowledge(), conductor
+    );
+
+    await useCase.execute(
+      makeInput({ mode: "advisory", advisoryReason: "test reason" })
+    );
+
+    const event = (conductor.emit as ReturnType<typeof mock>).mock.calls[0][0];
+    expect(event.payload.result.mode).toBe("advisory");
+    expect(event.payload.result.advisoryReason).toBe("test reason");
+  });
 });

@@ -17,11 +17,27 @@ const FLAKE_PATTERNS: Array<{ regex: RegExp; errorType: string }> = [
   { regex: /ENOMEM/i,                             errorType: "oom" },
 ];
 
+const JAVA_FLAKE_PATTERNS: Array<{ regex: RegExp; errorType: string }> = [
+  { regex: /SocketTimeoutException|ConnectException/i, errorType: "network_timeout" },
+];
+
+const GO_FLAKE_PATTERNS: Array<{ regex: RegExp; errorType: string }> = [
+  { regex: /i\/o timeout/i,       errorType: "io_timeout" },
+  { regex: /connection refused/i, errorType: "connection_refused" },
+];
+
 export function classifyByHeuristic(
   checkName: string,
-  output: string
+  output: string,
+  language?: string | null
 ): HeuristicMatch | null {
-  for (const pattern of FLAKE_PATTERNS) {
+  const activePatterns = [
+    ...FLAKE_PATTERNS,
+    ...(language === "java" ? JAVA_FLAKE_PATTERNS : []),
+    ...(language === "go"   ? GO_FLAKE_PATTERNS   : []),
+  ];
+
+  for (const pattern of activePatterns) {
     const match = output.match(pattern.regex);
     if (match) {
       return {

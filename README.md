@@ -29,11 +29,11 @@ bun test --recursive # run all tests across the monorepo
 |---|---|---|---|
 | `reviewer-agent` | 21 | 107 | Operational (legacy prototype) |
 | `@tilsley/shared` | 15 | 13 | Implemented |
-| `@tilsley/conductor` | 10 | 62 | Implemented |
+| `@tilsley/conductor` | 11 | 74 | Implemented |
 | `@tilsley/failure-analyst` | 9 | 61 | Implemented |
-| `@tilsley/review-agent` | 11 | 57 | Implemented |
+| `@tilsley/review-agent` | 11 | 62 | Implemented |
 | `@tilsley/distiller` | 9 | 51 | Implemented |
-| **Total** | **75** | **351** | |
+| **Total** | **76** | **368** | |
 
 ## Pipeline Flow
 
@@ -74,9 +74,9 @@ InMemoryOrchestratorAdapter
                                review-agent
                                 EvaluatePr
                                       │
-                   CorporateMemoryPort.findRelevantLessons()
-                   CorporateMemoryPort.findPastReviews()
-                   (backed by InMemoryRagAdapter in tests)
+                   KnowledgePort.findRelevantLessons()
+                   KnowledgePort.findPastReviews()
+                   (backed by MarkdownMemoryAdapter)
                                       │
                         ReviewerLlmPort.evaluateChecklist()
                         → ChecklistScore[] (weighted)
@@ -84,11 +84,16 @@ InMemoryOrchestratorAdapter
                      calculateOverallScore() → 0–100
                      makeReviewDecision()
                                       │
+                     advisory mode? ──┤
+                     (forced request_ │
+                      changes if CI   │
+                      has code_bug    │
+                      or escalate)    │
+                                      │
                    ┌──────────────────┼──────────────────┐
                    │                  │                  │
                 approve          escalate        request_changes
-                   │              comment             request_changes
-                approvePR()     commentPR()            review
+                approvePR()     commentPR()      requestChangesPR()
                    │
                    ▼
              emit("review.completed")
@@ -104,8 +109,8 @@ InMemoryOrchestratorAdapter
         deduplicateLessons()  — dedupes by problem+solution key
         meetsQualityThreshold() — min lengths, min tags
                    │
-        formatLessonForStorage() → RagDocument (stable hash ID)
-        RagPort.upsert(documents)
+        formatLessonForStorage() → MemoryDocument (stable hash ID)
+        MemoryPort.replace(documents)
                    │
                    ▼
              emit("distillation.completed")
@@ -125,7 +130,7 @@ InMemoryOrchestratorAdapter
 | review-agent | `ReviewerLlmPort` | `ChecklistScore[]` |
 | distiller | `SummarizerLlmPort` | `Lesson[]` |
 
-**RAG is stubbed.** `InMemoryRagAdapter` is used in tests (full text search). `RagPort` (`query` + `upsert`) is the interface — swap in Pinecone, pgvector, or similar when ready.
+**Lesson memory is file-based.** Lessons are persisted as markdown files via `MarkdownMemoryAdapter` (implements `MemoryPort`). The review agent loads relevant lessons at review time via `KnowledgePort` (backed by `InMemoryKnowledgeAdapter` in tests).
 
 **Heuristic-first classification.** The failure analyst tries 20 regex patterns (ETIMEDOUT, TypeError, SyntaxError, rate limit, etc.) before calling the LLM. LLM results below `confidence < 0.6` are downgraded to `unknown`.
 

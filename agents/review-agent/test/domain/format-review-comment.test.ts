@@ -14,6 +14,7 @@ function makeResult(overrides: Partial<ReviewResult> = {}): ReviewResult {
     overallScore: 78,
     decision: "escalate",
     feedback: "Some areas need improvement.",
+    mode: "full",
     ...overrides,
   };
 }
@@ -58,6 +59,24 @@ describe("formatReviewComment", () => {
     const comment = formatReviewComment(makeResult({ checklistScores: [] }));
     expect(comment).toContain("78/100");
     expect(comment).not.toContain("Checklist Scores");
+  });
+
+  test("shows advisory banner when mode is advisory", () => {
+    const comment = formatReviewComment(
+      makeResult({
+        mode: "advisory",
+        advisoryReason: "CI detected a code bug — fix the underlying failure before merging.",
+      })
+    );
+    expect(comment).toContain("CI Failure — Changes Requested Automatically");
+    expect(comment).toContain("code bug");
+    expect(comment).toContain("Code quality feedback is provided below");
+  });
+
+  test("no advisory banner when mode is full", () => {
+    const comment = formatReviewComment(makeResult({ mode: "full" }));
+    expect(comment).not.toContain("CI Failure");
+    expect(comment).not.toContain("Changes Requested Automatically");
   });
 });
 

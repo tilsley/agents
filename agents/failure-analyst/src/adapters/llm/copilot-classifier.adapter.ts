@@ -20,7 +20,11 @@ Respond ONLY with valid JSON — an **array** of objects, one per check:
 Guidelines:
 - Be conservative: if unsure, use "unknown" with low confidence
 - Flaky indicators: timeout, network errors, rate limits, non-deterministic ordering
-- Bug indicators: compilation errors, type errors, assertion failures on changed code`;
+- Bug indicators: compilation errors, type errors, assertion failures on changed code
+- When language is specified, apply language-specific knowledge:
+  Java: NullPointerException, BUILD FAILURE, Caused by, SocketTimeoutException
+  Go: panic, --- FAIL, goroutine, i/o timeout
+  TypeScript/JS: TypeError, ReferenceError, npm ERR!`;
 
 export class CopilotClassifierAdapter implements ClassifierLlmPort {
   constructor(private chatCompletion: ChatCompletionPort) {}
@@ -45,6 +49,9 @@ export class CopilotClassifierAdapter implements ClassifierLlmPort {
       sections.push(`## PR: ${contexts[0].prTitle}`);
       if (contexts[0].prBody) {
         sections.push(`### Description\n${contexts[0].prBody}`);
+      }
+      if (contexts[0].language) {
+        sections.push(`> **Language:** ${contexts[0].language}`);
       }
     }
 

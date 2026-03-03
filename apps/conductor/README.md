@@ -7,7 +7,7 @@ The orchestration layer that coordinates the multi-agent CI/CD pipeline.
 The conductor receives events (GitHub webhooks, agent completion signals, timer triggers), determines which agent should act next, and routes work accordingly. It manages the pipeline state machine:
 
 ```
-Fixer → CI → Failure Analyst → Review Agent → Merge → Distiller → RAG → (feedback loop)
+Fixer → CI → Failure Analyst → Review Agent → Merge → Distiller → Lesson Store → (feedback loop)
 ```
 
 ## Inngest Research
@@ -160,7 +160,8 @@ src/
 │   │   └── agent-assignment.ts      # AgentAssignment, AgentType
 │   └── policies/
 │       ├── routing-policy.ts        # event type → agent type mapping
-│       └── timeout-policy.ts        # per-agent timeout thresholds
+│       ├── timeout-policy.ts        # per-agent timeout thresholds
+│       └── review-mode-policy.ts    # FailureDecision[] → advisory/full mode
 ├── application/
 │   ├── ports/
 │   │   └── orchestrator.port.ts     # OrchestratorPort: emit, on, off
@@ -179,7 +180,8 @@ src/
 test/
 ├── domain/
 │   ├── routing-policy.test.ts       (10 tests)
-│   └── timeout-policy.test.ts       (5 tests)
+│   ├── timeout-policy.test.ts       (5 tests)
+│   └── review-mode-policy.test.ts   (7 tests — advisory/full derivation)
 ├── use-cases/
 │   ├── handle-webhook.test.ts       (8 tests)
 │   ├── route-event.test.ts          (8 tests)
@@ -210,6 +212,18 @@ type AgentType = "failure-analyst" | "review-agent" | "distiller"
 | `check_run.completed` | `failure-analyst` |
 | `failure-analysis.completed` | `review-agent` |
 | `review.completed` | `distiller` |
+
+## Review Mode Policy
+
+`deriveReviewMode(decisions)` maps the failure analyst's `FailureDecision[]` to a review mode:
+
+| Decision(s) present | Mode | Reason |
+|---|---|---|
+| `route_to_fixer` | `advisory` | CI detected a code bug |
+| `escalate` | `advisory` | CI failure unresolved after retries |
+| `retry` / `skip` only | `full` | — |
+
+`route_to_fixer` takes priority over `escalate` in mixed arrays. The result is threaded to the review agent's `EvaluatePr` input, which forces `request_changes` in advisory mode.
 
 ## Timeout Policy
 
@@ -261,4 +275,4 @@ Returns `{ status: "processing", eventType }` on success, `{ status: "ignored" }
 bun test --cwd apps/conductor
 ```
 
-62 tests across 7 files.
+74 tests across 8 files.

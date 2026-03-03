@@ -3,6 +3,15 @@ import type { ReviewResult, ChecklistScore } from "../entities/review-result";
 export function formatReviewComment(result: ReviewResult): string {
   const lines: string[] = [];
 
+  if (result.mode === "advisory") {
+    lines.push("> **CI Failure — Changes Requested Automatically**");
+    if (result.advisoryReason) {
+      lines.push(`> ${result.advisoryReason}`);
+    }
+    lines.push("> _Code quality feedback is provided below for reference._");
+    lines.push("");
+  }
+
   const emoji =
     result.decision === "approve"
       ? "APPROVED"

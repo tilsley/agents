@@ -1,5 +1,7 @@
 export type ReviewDecision = "approve" | "request_changes" | "escalate";
 
+export type ReviewMode = "advisory" | "full";
+
 export interface ChecklistScore {
   itemId: string;
   label: string;
@@ -12,4 +14,6 @@ export interface ReviewResult {
   overallScore: number;
   decision: ReviewDecision;
   feedback: string;
+  mode: ReviewMode;
+  advisoryReason?: string;
 }

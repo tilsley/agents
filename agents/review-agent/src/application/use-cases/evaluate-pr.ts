@@ -2,7 +2,7 @@ import type { GitHubPort, PullRequest, ReviewChecklist, FailureSignature } from 
 import type { ReviewerLlmPort } from "../ports/reviewer-llm.port";
 import type { KnowledgePort } from "../ports/knowledge.port";
 import type { ConductorPort } from "../ports/conductor.port";
-import type { ReviewResult } from "../../domain/entities/review-result";
+import type { ReviewResult, ReviewMode } from "../../domain/entities/review-result";
 import {
   makeReviewDecision,
   calculateOverallScore,
@@ -17,6 +17,8 @@ export interface EvaluatePrInput {
   checklist: ReviewChecklist;
   correlationId: string;
   failureSignatures?: FailureSignature[];
+  mode?: ReviewMode;
+  advisoryReason?: string;
 }
 
 export class EvaluatePr {
@@ -45,7 +47,7 @@ export class EvaluatePr {
       return null;
     }
 
-    // 2. Query RAG for relevant context
+    // 2. Query memory for relevant context
     const [lessons, pastReviews] = await Promise.all([
       this.knowledge.findRelevantLessons(
         `${pr.title} ${checklist.taskType}`,
@@ -82,12 +84,16 @@ export class EvaluatePr {
 
     // 5. Make decision
     const decision = makeReviewDecision(overallScore, this.thresholds);
+    const mode = input.mode ?? "full";
+    const finalDecision = mode === "advisory" ? "request_changes" : decision;
 
     const result: ReviewResult = {
       checklistScores: scores,
       overallScore,
-      decision,
-      feedback: this.buildFeedback(scores, decision),
+      decision: finalDecision,
+      feedback: this.buildFeedback(scores, finalDecision),
+      mode,
+      advisoryReason: input.advisoryReason,
     };
 
     // 6. Post review via GitHub
@@ -96,9 +102,9 @@ export class EvaluatePr {
     );
     const comment = formatReviewComment(result);
 
-    if (decision === "approve") {
+    if (finalDecision === "approve") {
       await this.github.approvePullRequest(owner, repo, prNumber, comment);
-    } else if (decision === "request_changes") {
+    } else if (finalDecision === "request_changes") {
       await this.github.requestChangesOnPullRequest(
         owner,
         repo,
@@ -109,7 +115,7 @@ export class EvaluatePr {
       await this.github.commentOnPullRequest(owner, repo, prNumber, comment);
     }
 
-    console.log(`[review-agent] PR #${prNumber} scored ${overallScore}/100 → ${decision}`);
+    console.log(`[review-agent] PR #${prNumber} scored ${overallScore}/100 → ${finalDecision}${mode === "advisory" ? " (advisory)" : ""}`);
     for (const s of scores) {
       console.log(`  [${s.label}] ${s.score}/100 — ${s.reasoning}`);
     }

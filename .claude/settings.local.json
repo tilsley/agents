@@ -23,7 +23,9 @@
       "Bash(grep:*)",
       "Bash(grep error TS:*)",
       "Bash(chmod +x:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:arxiv.org)"
     ]
   }
 }

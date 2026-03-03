@@ -17,6 +17,7 @@ export { truncateLog } from "./domain/utils/truncate-log";
 export type { TruncateLogOptions } from "./domain/utils/truncate-log";
 export { ok, err } from "./domain/utils/result";
 export type { Result } from "./domain/utils/result";
+export { detectLanguage } from "./domain/utils/detect-language";
 
 // Application ports
 export type { GitHubPort } from "./application/ports/github.port";

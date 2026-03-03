@@ -57,7 +57,60 @@ export class GitHubAdapter implements GitHubPort {
     checkRunId: number
   ): Promise<string> {
     try {
-      return await this.getCheckRunAnnotations(owner, repo, checkRunId);
+      // Resolve the GitHub Actions job ID from the check run's details_url.
+      // Format: https://github.com/{owner}/{repo}/actions/runs/{run_id}/job/{job_id}
+      // Non-Actions check runs (CircleCI, Jenkins, etc.) won't match — return "" for those.
+      const { data: checkRun } = await this.octokit.checks.get({
+        owner,
+        repo,
+        check_run_id: checkRunId,
+      });
+
+      const jobIdMatch = checkRun.details_url?.match(/\/job\/(\d+)/);
+      if (!jobIdMatch) return "";
+
+      const jobId = parseInt(jobIdMatch[1], 10);
+
+      // Find the failed step name so we can isolate its log section.
+      const { data: job } = await this.octokit.actions.getJobForWorkflowRun({
+        owner,
+        repo,
+        job_id: jobId,
+      });
+      const failedStep = job.steps?.find((s) => s.conclusion === "failure");
+
+      // Download plain-text job log (GitHub redirects to a temporary URL).
+      const response = await this.octokit.request(
+        "GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+        { owner, repo, job_id: jobId }
+      );
+
+      const fullLog =
+        typeof response.data === "string"
+          ? response.data
+          : Buffer.isBuffer(response.data)
+            ? response.data.toString("utf-8")
+            : null;
+
+      if (!fullLog) return "";
+      if (!failedStep) return fullLog;
+
+      // Parse out the ##[group]{failedStepName}...##[endgroup] block.
+      // Lines carry a timestamp prefix in the raw log; strip it temporarily for matching.
+      const timestampPrefix = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s/;
+      const lines = fullLog.split("\n");
+      const stripped = lines.map((l) => l.replace(timestampPrefix, ""));
+
+      const groupHeader = `##[group]${failedStep.name}`;
+      const startIdx = stripped.findIndex((l) => l === groupHeader);
+      if (startIdx === -1) return fullLog;
+
+      const endIdx = stripped.findIndex(
+        (l, i) => i > startIdx && l === "##[endgroup]"
+      );
+      const sliceEnd = endIdx === -1 ? lines.length : endIdx + 1;
+
+      return lines.slice(startIdx, sliceEnd).join("\n");
     } catch {
       return "";
     }

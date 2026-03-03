@@ -4,7 +4,7 @@ Post-merge summarization and corporate memory writer.
 
 ## Role
 
-The Distiller receives the full context of a completed pipeline run, uses an LLM to extract actionable lessons, and persists the quality-filtered results to the RAG database.
+The Distiller receives the full context of a completed pipeline run, uses an LLM to extract actionable lessons, and persists the quality-filtered results to the lesson store.
 
 **Responsibilities:**
 
@@ -13,8 +13,8 @@ The Distiller receives the full context of a completed pipeline run, uses an LLM
 3. Filter: remove lessons with empty `problem` or `solution`.
 4. Deduplicate: drop lessons where `problem + solution` keys collide (case-insensitive).
 5. Quality-filter: remove lessons below minimum length and tag thresholds.
-6. Format each lesson into a `RagDocument` with a stable hash-based ID.
-7. Persist to `RagPort.upsert()`.
+6. Format each lesson into a `MemoryDocument` with a stable hash-based ID.
+7. Persist to `MemoryPort.replace()`.
 8. Emit `distillation.completed` with counts (stored / filtered).
 
 ## Lesson Lifecycle
@@ -32,9 +32,9 @@ LLM output (raw Lesson[])
     │  problem.length ≥ 10, solution.length ≥ 10, tags.length ≥ 1
     │
     ▼ formatLessonForStorage()
-    │  → RagDocument { id: "lesson-<hash>", content, metadata: { type, tags } }
+    │  → MemoryDocument { id: "lesson-<hash>", content, metadata: { type, tags } }
     │
-    ▼ RagPort.upsert(documents)
+    ▼ MemoryPort.replace(documents)
 ```
 
 ## Directory Structure
@@ -49,7 +49,7 @@ src/
 │   │   ├── summarization-policy.ts  # shouldIncludeLesson(), deduplicateLessons(), getIncludedContext()
 │   │   └── quality-policy.ts        # meetsQualityThreshold(), getQualityScore()
 │   └── utils/
-│       └── format-lesson.ts         # formatLessonForStorage() → RagDocument, formatLessonSummary()
+│       └── format-lesson.ts         # formatLessonForStorage() → MemoryDocument, formatLessonSummary()
 ├── application/
 │   ├── ports/
 │   │   ├── summarizer-llm.port.ts   # SummarizerLlmPort: summarize(PipelineSummary) → Lesson[]
@@ -123,7 +123,7 @@ Returns `[]` on parse failure — never throws.
 
 ## Lesson ID Stability
 
-`formatLessonForStorage()` generates a deterministic ID using a djb2-style hash of `problem + solution + context`. The same lesson content always produces the same `RagDocument.id`, which means `upsert()` will overwrite rather than duplicate on re-runs.
+`formatLessonForStorage()` generates a deterministic ID using a djb2-style hash of `problem + solution + context`. The same lesson content always produces the same `MemoryDocument.id`, which means `replace()` will overwrite rather than duplicate on re-runs.
 
 ## Tests
 

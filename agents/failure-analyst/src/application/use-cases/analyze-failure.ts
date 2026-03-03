@@ -8,6 +8,7 @@ import {
   shouldTrustLlmClassification,
 } from "../../domain/policies/classification-policy";
 import { shouldEscalateRetry } from "../../domain/policies/retry-policy";
+import { extractErrorLines } from "../../domain/utils/extract-error-lines";
 import type { RetryTrackerPort } from "../../adapters/state/in-memory-retry-tracker";
 
 export interface AnalyzeFailureInput {
@@ -15,6 +16,7 @@ export interface AnalyzeFailureInput {
   repo: string;
   headSha: string;
   checkRuns: CheckRun[];
+  language?: string | null;
 }
 
 export class AnalyzeFailure {
@@ -27,7 +29,7 @@ export class AnalyzeFailure {
   ) {}
 
   async execute(input: AnalyzeFailureInput): Promise<FailureAnalysis[]> {
-    const { owner, repo, headSha, checkRuns } = input;
+    const { owner, repo, headSha, checkRuns, language } = input;
 
     // 1. Look up PR
     const pr = await this.github.getPullRequestForCheckRun(owner, repo, headSha);
@@ -52,7 +54,7 @@ export class AnalyzeFailure {
       const output = [check.output.title, check.output.summary, check.output.text]
         .filter(Boolean)
         .join("\n\n");
-      const hint = classifyByHeuristic(check.name, output);
+      const hint = classifyByHeuristic(check.name, output, language);
       if (hint) heuristicHints.set(check.id, hint);
     }
 
@@ -69,14 +71,19 @@ export class AnalyzeFailure {
           .filter(Boolean)
           .join("\n\n");
 
+        // Annotation fast path: Jest's github-actions reporter writes [failure] annotations
+        // that already pinpoint the exact error. When present, the raw log adds noise.
+        const hasFailureAnnotations = annotations.includes("[failure]");
+
         return {
           checkName: check.name,
           checkRunId: check.id,
           checkOutput: [checkOutput, annotations].filter(Boolean).join("\n\n"),
-          checkLog: log,
+          checkLog: hasFailureAnnotations ? "" : extractErrorLines(log, { language }),
           prTitle: pr.title,
           prBody: pr.body,
           heuristicHint: heuristicHints.get(check.id) ?? null,
+          language: language ?? null,
         };
       })
     );

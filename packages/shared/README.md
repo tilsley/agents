@@ -19,7 +19,7 @@ This package is the common dependency for all agents and apps in the monorepo. I
 | `FailureCategory` | `"code_bug" \| "infra_flake" \| "unknown"` |
 | `ReviewChecklist` | `taskType, items: ChecklistItem[]` — task-specific review criteria |
 | `ChecklistItem` | `id, label, description, weight` |
-| `Lesson` | `problem, solution, context, outcome, tags, metadata` — RAG-storable lesson learned |
+| `Lesson` | `problem, solution, context, outcome, tags, metadata` — structured lesson learned |
 | `PipelineContext` | Full context of a pipeline run (PR, checks, signatures, diff, lessons) |
 
 ### Domain Utils
@@ -39,9 +39,6 @@ This package is the common dependency for all agents and apps in the monorepo. I
 | `GitHubPort` | Full GitHub operations interface: fetch PR, check runs, annotations, logs, rerun, close, diff, comment, approve, request-changes, merge |
 | `ChatCompletionPort` | Low-level LLM abstraction: `complete(messages: ChatMessage[]) → string` |
 | `ChatMessage` | `{ role: "system" \| "user" \| "assistant"; content: string }` |
-| `RagPort` | `query(text, opts?) → RagDocument[]` and `upsert(docs)` |
-| `RagDocument` | `{ id, content, metadata }` |
-| `RagQueryOptions` | `limit?, threshold?, filter?` |
 | `EventBufferPort<T>` | Debounce buffer: `add(event, handler)` / `dispose()` |
 
 ### Types
@@ -72,7 +69,6 @@ src/
 │   └── ports/
 │       ├── github.port.ts
 │       ├── llm.port.ts
-│       ├── rag.port.ts
 │       └── event-buffer.port.ts
 └── types/
     ├── pipeline-event.ts

@@ -15,10 +15,13 @@
   },
   "references": [
     { "path": "packages/shared" },
+    { "path": "packages/adapters" },
     { "path": "apps/conductor" },
     { "path": "agents/failure-analyst" },
     { "path": "agents/review-agent" },
-    { "path": "agents/distiller" }
+    { "path": "agents/distiller" },
+    { "path": "agents/upgrade-agent" },
+    { "path": "agents/doc-gardener" }
   ],
   "exclude": ["node_modules", "dist"]
 }

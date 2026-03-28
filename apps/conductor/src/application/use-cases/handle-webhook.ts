@@ -1,5 +1,5 @@
 import type { PipelineEvent, CheckRun } from "@tilsley/shared";
-import type { OrchestratorPort } from "../ports/orchestrator.port";
+import type { OrchestratorPort } from "@tilsley/shared";
 
 export interface WebhookPayload {
   action: string;
@@ -22,6 +22,15 @@ export interface WebhookPayload {
     prAuthor: string;
     prTitle: string;
   };
+  issueComment?: {
+    commentId: number;
+    commentBody: string;
+    commentAuthor: string;
+    issueNumber: number;
+    isPullRequest: boolean;
+    issueBody: string;
+    issueAuthor: string;
+  };
   repository: {
     owner: string;
     name: string;
@@ -38,6 +47,10 @@ export class HandleWebhook {
 
     if (payload.eventType === "check_run") {
       return this.handleCheckRun(payload);
+    }
+
+    if (payload.eventType === "issue_comment") {
+      return this.handleIssueComment(payload);
     }
 
     return null;
@@ -104,6 +117,47 @@ export class HandleWebhook {
       payload: { owner, repo, checkRun, headSha: cr.headSha },
       timestamp: new Date(),
       correlationId: `${owner}/${repo}:${cr.headSha}`,
+    };
+
+    await this.orchestrator.emit(event);
+    return event;
+  }
+
+  private async handleIssueComment(payload: WebhookPayload): Promise<PipelineEvent | null> {
+    if (payload.action !== "created") {
+      return null;
+    }
+
+    if (!payload.issueComment) {
+      return null;
+    }
+
+    // Only process comments on PRs (not regular issues)
+    if (!payload.issueComment.isPullRequest) {
+      return null;
+    }
+
+    // Filter: only process comments on PRs authored by bot accounts
+    const botAuthors = ["doc-gardener-bot", "chore-bot", "tilsley-bot"];
+    if (!botAuthors.includes(payload.issueComment.issueAuthor)) {
+      return null;
+    }
+
+    const { owner, name: repo } = payload.repository;
+    const { commentBody, commentAuthor, issueNumber, issueBody } = payload.issueComment;
+
+    const event: PipelineEvent = {
+      type: "issue_comment.created",
+      payload: {
+        owner,
+        repo,
+        prNumber: issueNumber,
+        commentBody,
+        commentAuthor,
+        prBody: issueBody,
+      },
+      timestamp: new Date(),
+      correlationId: `${owner}/${repo}:comment-${payload.issueComment.commentId}`,
     };
 
     await this.orchestrator.emit(event);

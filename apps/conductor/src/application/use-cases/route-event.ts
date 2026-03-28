@@ -1,5 +1,5 @@
 import type { PipelineEvent, AgentTask } from "@tilsley/shared";
-import type { OrchestratorPort } from "../ports/orchestrator.port";
+import type { OrchestratorPort } from "@tilsley/shared";
 import { getAgentForEvent, getSupportedEventTypes } from "../../domain/policies/routing-policy";
 import type { AgentType } from "../../domain/entities/agent-assignment";
 

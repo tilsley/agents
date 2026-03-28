@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Run } from "./types";
-import { RunForm } from "./components/RunForm";
+import { RunForm, type RunParams } from "./components/RunForm";
 import { RunDetail } from "./components/RunDetail";
 import { RunHistory } from "./components/RunHistory";
 
@@ -17,11 +17,11 @@ export default function App() {
     void fetchRuns();
   }, []);
 
-  const handleRun = async (owner: string, repo: string) => {
+  const handleRun = async (params: RunParams) => {
     const res = await fetch("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner, repo }),
+      body: JSON.stringify(params),
     });
     if (!res.ok) return;
     const { runId } = (await res.json()) as { runId: string };

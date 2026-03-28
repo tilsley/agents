@@ -1,7 +1,10 @@
 export interface Run {
   id: string;
+  agent: "patch" | "upgrade";
   owner: string;
   repo: string;
+  packageName?: string;
+  toVersion?: string;
   status: "running" | "completed" | "failed";
   logs: string[];
   prNumber?: number;
@@ -19,7 +22,13 @@ export interface Stage {
   detail?: string;
 }
 
-export function parsePipelineStages(logs: string[]): Stage[] {
+export function parsePipelineStages(run: Run, logs: string[]): Stage[] {
+  return run.agent === "upgrade"
+    ? parseUpgradeStages(logs)
+    : parsePatchStages(logs);
+}
+
+function parsePatchStages(logs: string[]): Stage[] {
   const text = logs.join("\n");
 
   const has = (pattern: RegExp) => pattern.test(text);
@@ -31,7 +40,6 @@ export function parsePipelineStages(logs: string[]): Stage[] {
   const applyDone = has(/Running checks|nothing to apply|All candidate fixes/);
   const prDone = has(/Opened PR #\d+/);
 
-  // Detail strings
   const scanDetail = (() => {
     const m = text.match(/Found (\d+) fixable/);
     if (m) return `${m[1]} vulns`;
@@ -64,7 +72,6 @@ export function parsePipelineStages(logs: string[]): Stage[] {
     return m ? `#${m[1]}` : undefined;
   })();
 
-  // Determine the current running stage
   const activeIndex = [cloneDone, scanDone, adviseDone, applyDone, prDone].lastIndexOf(true) + 1;
 
   const stageStatus = (doneFlag: boolean, index: number): StageStatus => {
@@ -74,17 +81,8 @@ export function parsePipelineStages(logs: string[]): Stage[] {
   };
 
   return [
-    {
-      id: "clone",
-      label: "Clone",
-      status: stageStatus(cloneDone, 0),
-    },
-    {
-      id: "scan",
-      label: "Scan",
-      status: stageStatus(scanDone, 1),
-      detail: scanDetail,
-    },
+    { id: "clone", label: "Clone", status: stageStatus(cloneDone, 0) },
+    { id: "scan", label: "Scan", status: stageStatus(scanDone, 1), detail: scanDetail },
     {
       id: "plan",
       label: "Plan",
@@ -119,11 +117,61 @@ export function parsePipelineStages(logs: string[]): Stage[] {
         : stageStatus(false, 4),
       detail: checksDetail,
     },
+    { id: "pr", label: "PR", status: prDone ? "done" : stageStatus(false, 5), detail: prDetail },
+  ];
+}
+
+function parseUpgradeStages(logs: string[]): Stage[] {
+  const text = logs.join("\n");
+  const has = (pattern: RegExp) => pattern.test(text);
+
+  const cloneDone = has(/\[upgrade-agent\] Cloned /);
+  const researchDone = has(/\[upgrade-agent\] Research complete/);
+  const bumpDone = has(/\[upgrade-agent\] Bumped /);
+  const testsDone = has(/\[upgrade-agent\] Tests (passing|still failing)/);
+  const prDone = has(/\[upgrade-agent\] Opened PR #/);
+
+  const researchDetail = (() => {
+    const m = text.match(/Research complete — risk: (\w+)/);
+    return m ? `risk: ${m[1]}` : undefined;
+  })();
+
+  const testsDetail = (() => {
+    if (has(/Tests passing after (\d+) iteration/)) {
+      const m = text.match(/Tests passing after (\d+)/);
+      return m?.[1] === "0" ? "passed" : `passed (${m![1]} fix${m![1] === "1" ? "" : "es"})`;
+    }
+    if (has(/Tests still failing/)) return "failing";
+    const m = text.match(/iteration (\d+)\/(\d+)/g);
+    if (m) return `fix ${m.length}`;
+    return undefined;
+  })();
+
+  const prDetail = (() => {
+    const m = text.match(/Opened PR #(\d+)/);
+    return m ? `#${m[1]}` : undefined;
+  })();
+
+  const activeIndex = [cloneDone, researchDone, bumpDone, testsDone, prDone].lastIndexOf(true) + 1;
+
+  const stageStatus = (doneFlag: boolean, index: number): StageStatus => {
+    if (doneFlag) return "done";
+    if (index === activeIndex) return "running";
+    return "pending";
+  };
+
+  return [
+    { id: "clone", label: "Clone", status: stageStatus(cloneDone, 0) },
+    { id: "research", label: "Research", status: stageStatus(researchDone, 1), detail: researchDetail },
+    { id: "bump", label: "Bump", status: stageStatus(bumpDone, 2) },
     {
-      id: "pr",
-      label: "PR",
-      status: prDone ? "done" : stageStatus(false, 5),
-      detail: prDetail,
+      id: "tests",
+      label: "Tests",
+      status: testsDone
+        ? has(/Tests still failing/) ? "warn" : "done"
+        : stageStatus(false, 3),
+      detail: testsDetail,
     },
+    { id: "pr", label: "PR", status: prDone ? "done" : stageStatus(false, 4), detail: prDetail },
   ];
 }

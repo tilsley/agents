@@ -1,5 +1,5 @@
 import { Octokit } from "@octokit/rest";
-import type { GitHubPort, PullRequest } from "@tilsley/shared";
+import type { GitHubPort, GitHubIssueResult, PullRequest } from "@tilsley/shared";
 
 export class GitHubAdapter implements GitHubPort {
   constructor(private octokit: Octokit) {}
@@ -263,4 +263,80 @@ export class GitHubAdapter implements GitHubPort {
     });
     return { number: data.number, url: data.html_url };
   }
+
+  async searchIssues(
+    owner: string,
+    repo: string,
+    query: string
+  ): Promise<GitHubIssueResult[]> {
+    try {
+      const { data } = await this.octokit.search.issuesAndPullRequests({
+        q: `repo:${owner}/${repo} ${query} is:issue`,
+        per_page: 10,
+        sort: "created",
+        order: "desc",
+      });
+
+      return data.items.map((item) => ({
+        title: item.title,
+        url: item.html_url,
+        body: item.body ?? "",
+        state: item.state,
+        labels: item.labels.map((l) =>
+          typeof l === "string" ? l : l.name ?? ""
+        ),
+        createdAt: item.created_at,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async getReleaseNotes(
+    owner: string,
+    repo: string,
+    fromVersion: string,
+    toVersion: string
+  ): Promise<string> {
+    try {
+      const releases = await this.octokit.paginate(
+        this.octokit.repos.listReleases,
+        { owner, repo, per_page: 100 }
+      );
+
+      const from = parseSemver(fromVersion);
+      const to = parseSemver(toVersion);
+      if (!from || !to) return "";
+
+      const relevant = releases.filter((r) => {
+        const v = parseSemver(r.tag_name);
+        return v && semverGt(v, from) && !semverGt(v, to);
+      });
+
+      if (relevant.length === 0) return "";
+
+      const body = relevant
+        .map((r) => `## ${r.name ?? r.tag_name}\n\n${r.body ?? ""}`.trim())
+        .join("\n\n---\n\n");
+
+      return body.slice(0, 8_000);
+    } catch {
+      return "";
+    }
+  }
+}
+
+type Semver = [number, number, number];
+
+function parseSemver(v: string): Semver | null {
+  const clean = v.replace(/^[v^~]/, "");
+  const parts = clean.split(".").map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) return null;
+  return [parts[0], parts[1], parts[2]];
+}
+
+function semverGt(a: Semver, b: Semver): boolean {
+  if (a[0] !== b[0]) return a[0] > b[0];
+  if (a[1] !== b[1]) return a[1] > b[1];
+  return a[2] > b[2];
 }

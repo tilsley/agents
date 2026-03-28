@@ -5,8 +5,11 @@ import { join, dirname } from "path";
 
 export interface Run {
   id: string;
+  agent: "patch" | "upgrade";
   owner: string;
   repo: string;
+  packageName?: string;
+  toVersion?: string;
   status: "running" | "completed" | "failed";
   logs: string[];
   prNumber?: number;
@@ -23,32 +26,49 @@ const PATCH_AGENT_MAIN = new URL(
   // Resolve relative to repo root, two levels up from apps/conductor
   new URL("../../../../../../", import.meta.url)
 ).pathname;
+const UPGRADE_AGENT_MAIN = PATCH_AGENT_MAIN.replace("patch-agent", "upgrade-agent");
 
 export function createApiRouter(): Hono {
   const app = new Hono();
 
-  // Trigger a new patch-agent run
+  // Trigger a new agent run
   app.post("/api/runs", async (c) => {
-    const body = await c.req.json<{ owner: string; repo: string }>();
-    const { owner, repo } = body;
+    const body = await c.req.json<{
+      agent?: "patch" | "upgrade";
+      owner: string;
+      repo: string;
+      packageName?: string;
+      toVersion?: string;
+      fromVersion?: string;
+      base?: string;
+    }>();
+    const { agent = "patch", owner, repo } = body;
 
     if (!owner?.trim() || !repo?.trim()) {
       return c.json({ error: "owner and repo are required" }, 400);
     }
 
+    // packageName/toVersion are optional for upgrade — omitting both enables auto-discover mode
+
     const id = `run-${Date.now()}`;
     const run: Run = {
       id,
+      agent,
       owner,
       repo,
+      packageName: body.packageName,
+      toVersion: body.toVersion,
       status: "running",
       logs: [],
       startedAt: new Date().toISOString(),
     };
     runs.set(id, run);
 
-    // Fire and forget — client streams progress via SSE
-    void spawnPatchAgent(run);
+    if (agent === "upgrade") {
+      void spawnUpgradeAgent(run, body.fromVersion, body.base);
+    } else {
+      void spawnPatchAgent(run);
+    }
 
     return c.json({ runId: id });
   });
@@ -119,6 +139,60 @@ export function createApiRouter(): Hono {
   });
 
   return app;
+}
+
+async function spawnUpgradeAgent(run: Run, fromVersion?: string, base?: string): Promise<void> {
+  const addLog = (line: string) => run.logs.push(line);
+
+  try {
+    const env: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+      TARGET_OWNER: run.owner,
+      TARGET_REPO: run.repo,
+      PACKAGE_NAME: run.packageName!,
+      TO_VERSION: run.toVersion!,
+    };
+    if (fromVersion) env["FROM_VERSION"] = fromVersion;
+    if (base) env["BASE_BRANCH"] = base;
+
+    const proc = Bun.spawn(["bun", "run", UPGRADE_AGENT_MAIN], {
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const readLines = async (stream: ReadableStream<Uint8Array>) => {
+      const reader = stream.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const l of lines) if (l.trim()) addLog(l);
+      }
+      if (buf.trim()) addLog(buf);
+    };
+
+    await Promise.all([readLines(proc.stdout), readLines(proc.stderr)]);
+    await proc.exited;
+
+    const allLogs = run.logs.join("\n");
+    const prMatch = allLogs.match(/Opened PR #(\d+): (https:\/\/\S+)/);
+    if (prMatch) {
+      run.prNumber = parseInt(prMatch[1]);
+      run.prUrl = prMatch[2];
+    }
+
+    run.status = proc.exitCode === 0 ? "completed" : "failed";
+  } catch (err) {
+    addLog(`[api] Failed to spawn upgrade-agent: ${String(err)}`);
+    run.status = "failed";
+  }
+
+  run.completedAt = new Date().toISOString();
 }
 
 async function spawnPatchAgent(run: Run): Promise<void> {

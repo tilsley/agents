@@ -9,6 +9,7 @@ const EVENT_TO_AGENT: Record<string, AgentType> = {
   "check_run.failed": "failure-analyst",
   "failure-analysis.completed": "review-agent",
   "review.completed": "distiller",
+  "issue_comment.created": "feedback-classifier",
 };
 
 export function getAgentForEvent(eventType: string): AgentType | null {

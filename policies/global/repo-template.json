@@ -1,0 +1,41 @@
+{
+  "name": "default",
+  "description": "Standard documentation structure for all repositories",
+  "files": [
+    {
+      "path": "README.md",
+      "required": true,
+      "sections": [
+        { "heading": "Quick Start", "required": true, "description": "How to clone, install, and run" },
+        { "heading": "Configuration", "required": true, "description": "Environment variables, config files, and runtime options" },
+        { "heading": "Architecture", "required": true, "description": "Brief overview or link to ARCHITECTURE.md" }
+      ]
+    },
+    {
+      "path": "ARCHITECTURE.md",
+      "required": true,
+      "sections": [
+        { "heading": "Overview", "required": true, "description": "What the system does and key design philosophy" },
+        { "heading": "Components", "required": true, "description": "Major modules and their responsibilities" },
+        { "heading": "Data Flow", "required": true, "description": "How a request/event flows through the system" }
+      ],
+      "constraints": ["Must contain at least one Mermaid diagram (```mermaid code block)"]
+    },
+    {
+      "path": "SECURITY.md",
+      "required": true
+    },
+    {
+      "path": "CODEOWNERS",
+      "required": true
+    }
+  ],
+  "directories": [
+    {
+      "path": "docs/adr",
+      "required": false,
+      "filePattern": "*.md",
+      "formatDescription": "ADR files should follow Nygard format: Status, Context, Decision, Consequences"
+    }
+  ]
+}

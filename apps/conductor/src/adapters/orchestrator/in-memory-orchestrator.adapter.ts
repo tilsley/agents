@@ -1,5 +1,4 @@
-import type { PipelineEvent } from "@tilsley/shared";
-import type { OrchestratorPort, EventHandler } from "../../application/ports/orchestrator.port";
+import type { OrchestratorPort, EventHandler, PipelineEvent } from "@tilsley/shared";
 
 export class InMemoryOrchestratorAdapter implements OrchestratorPort {
   private handlers = new Map<string, Set<EventHandler>>();

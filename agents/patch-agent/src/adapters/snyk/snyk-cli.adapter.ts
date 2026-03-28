@@ -1,4 +1,4 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { SnykPort } from "../../application/ports/snyk.port";
 import type {
@@ -46,6 +46,8 @@ export class SnykCliAdapter implements SnykPort {
       throw new Error(`[snyk-cli] No output from snyk (exit ${proc.exitCode}). stderr: ${stderr}`);
     }
 
+    if (stderr.trim()) console.log(`[snyk-cli] stderr: ${stderr.trim()}`);
+
     // exit 0 = clean, exit 1 = vulnerabilities found — both produce a valid vulnerabilities array
     // exit 2 = scan error (auth failure, network, etc.)
     // exit 3 = no supported target files (unsupported lockfile, missing node_modules, etc.)
@@ -76,6 +78,9 @@ export class SnykCliAdapter implements SnykPort {
 
     console.log("[snyk-cli] bun.lock detected — generating package-lock.json for Snyk compatibility");
 
+    // npm doesn't understand "workspace:*" protocol — rewrite to "*" in all package.json files
+    this.stripWorkspaceProtocol(workDir);
+
     const proc = Bun.spawn(
       ["npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit"],
       { cwd: workDir, stdout: "pipe", stderr: "pipe" }
@@ -89,6 +94,23 @@ export class SnykCliAdapter implements SnykPort {
     }
 
     console.log("[snyk-cli] package-lock.json generated");
+  }
+
+  /**
+   * Rewrite `"workspace:*"` → `"*"` in all package.json files so npm can
+   * resolve the dependency tree. Safe because this runs on a temp clone.
+   */
+  private stripWorkspaceProtocol(workDir: string): void {
+    const glob = new Bun.Glob("**/package.json");
+    for (const rel of glob.scanSync({ cwd: workDir })) {
+      if (rel.includes("node_modules")) continue;
+      const abs = join(workDir, rel);
+      const raw = readFileSync(abs, "utf-8");
+      if (!raw.includes('"workspace:')) continue;
+      const replaced = raw.replace(/"workspace:([^"]*)"/g, '"$1"');
+      writeFileSync(abs, replaced);
+      console.log(`[snyk-cli] rewrote workspace: protocols in ${rel}`);
+    }
   }
 
   private extractSnykError(stdout: string): string | null {

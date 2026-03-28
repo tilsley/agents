@@ -47,6 +47,18 @@ export function createConductorWebhookServer(
         user: { login: string };
         title: string;
       };
+      issue?: {
+        number: number;
+        pull_request?: { url: string };
+        user: { login: string };
+        title: string;
+        body: string | null;
+      };
+      comment?: {
+        id: number;
+        body: string;
+        user: { login: string };
+      };
       repository: {
         owner: { login: string };
         name: string;
@@ -74,6 +86,18 @@ export function createConductorWebhookServer(
             prTitle: raw.pull_request.title,
           }
         : undefined,
+      issueComment:
+        raw.comment && raw.issue
+          ? {
+              commentId: raw.comment.id,
+              commentBody: raw.comment.body,
+              commentAuthor: raw.comment.user.login,
+              issueNumber: raw.issue.number,
+              isPullRequest: !!raw.issue.pull_request,
+              issueBody: raw.issue.body ?? "",
+              issueAuthor: raw.issue.user.login,
+            }
+          : undefined,
       repository: {
         owner: raw.repository.owner.login,
         name: raw.repository.name,

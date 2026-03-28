@@ -60,7 +60,7 @@ export function RunDetail({ run, onRunUpdate }: Props) {
     };
   }, [run.id]);
 
-  const stages = parsePipelineStages(logs);
+  const stages = parsePipelineStages(run, logs);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -77,6 +77,11 @@ export function RunDetail({ run, onRunUpdate }: Props) {
       >
         <div>
           <span style={{ fontWeight: 600 }}>{run.owner}/{run.repo}</span>
+          {run.agent === "upgrade" && run.packageName && (
+            <span style={{ marginLeft: 8, fontSize: 12, color: "var(--muted)" }}>
+              {run.packageName} → {run.toVersion}
+            </span>
+          )}
           <span
             style={{
               marginLeft: 10,

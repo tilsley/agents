@@ -1,5 +1,5 @@
 import type { PipelineEvent, AgentResult } from "@tilsley/shared";
-import type { OrchestratorPort } from "../ports/orchestrator.port";
+import type { OrchestratorPort } from "@tilsley/shared";
 import { getNextStageEvent, isTerminalEvent } from "../../domain/policies/routing-policy";
 
 export class HandleAgentCompletion {

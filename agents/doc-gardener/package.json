@@ -1,0 +1,20 @@
+{
+  "name": "@tilsley/doc-gardener",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "@tilsley/adapters": "workspace:*",
+    "@tilsley/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}

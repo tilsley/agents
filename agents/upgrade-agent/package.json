@@ -1,0 +1,17 @@
+{
+  "name": "@tilsley/upgrade-agent",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "@tilsley/adapters": "workspace:*",
+    "@tilsley/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}

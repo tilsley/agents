@@ -1,4 +1,4 @@
-.PHONY: help dev setup conductor forward patch-agent
+.PHONY: help dev setup conductor forward patch-agent upgrade-agent doc-gardener copilot-auth
 
 # GitHub App Configuration
 export GITHUB_APP_ID         ?= 2920581
@@ -22,6 +22,7 @@ help:
 	@echo "  make conductor       Start the conductor webhook server only (port $${PORT})"
 	@echo "  make forward         Forward GitHub webhooks to the local conductor"
 	@echo "  make patch-agent     Scan TARGET_REPO for vulns and open a patch PR"
+	@echo "  make copilot-auth    Device flow auth for Copilot CLI → stores tokens in SSM"
 	@echo ""
 	@echo "First time? Run: make setup"
 	@echo ""
@@ -116,3 +117,42 @@ patch-agent:
 	TARGET_REPO="$$TARGET_REPO" \
 	MIN_SEVERITY="$${MIN_SEVERITY:-high}" \
 	bun run agents/patch-agent/src/main.ts
+
+doc-gardener:
+	@if [ -z "$$GITHUB_TOKEN" ]; then echo "Error: GITHUB_TOKEN not set."; exit 1; fi
+	@if [ -z "$$TARGET_REPO" ]; then echo "Error: TARGET_REPO not set."; exit 1; fi
+	GITHUB_TOKEN="$$GITHUB_TOKEN" \
+	COPILOT_GITHUB_TOKEN="$${COPILOT_GITHUB_TOKEN:-$$GITHUB_TOKEN}" \
+	TARGET_OWNER="$${TARGET_OWNER:-tilsley}" \
+	TARGET_REPO="$$TARGET_REPO" \
+	BASE_BRANCH="$${BASE_BRANCH:-main}" \
+	bun run agents/doc-gardener/src/main.ts
+
+upgrade-agent:
+	@if [ -z "$$GITHUB_TOKEN" ]; then \
+		echo "Error: GITHUB_TOKEN not set."; \
+		exit 1; \
+	fi
+	@if [ -z "$$TARGET_REPO" ]; then \
+		echo "Error: TARGET_REPO not set (e.g. make upgrade-agent TARGET_REPO=my-repo)"; \
+		echo "  With a specific package: make upgrade-agent TARGET_REPO=my-repo PACKAGE_NAME=express TO_VERSION=5.0.0"; \
+		echo "  Auto-discover mode:      make upgrade-agent TARGET_REPO=my-repo"; \
+		exit 1; \
+	fi
+	GITHUB_TOKEN="$$GITHUB_TOKEN" \
+	COPILOT_GITHUB_TOKEN="$${COPILOT_GITHUB_TOKEN:-$$GITHUB_TOKEN}" \
+	TARGET_OWNER="$${TARGET_OWNER:-tilsley}" \
+	TARGET_REPO="$$TARGET_REPO" \
+	PACKAGE_NAME="$${PACKAGE_NAME:-}" \
+	TO_VERSION="$${TO_VERSION:-}" \
+	FROM_VERSION="$${FROM_VERSION:-}" \
+	BASE_BRANCH="$${BASE_BRANCH:-main}" \
+	MAX_FIX_ITERATIONS="$${MAX_FIX_ITERATIONS:-5}" \
+	bun run agents/upgrade-agent/src/main.ts
+
+copilot-auth:
+	@if [ -z "$$GITHUB_APP_CLIENT_ID" ]; then echo "Error: GITHUB_APP_CLIENT_ID not set."; exit 1; fi
+	GITHUB_APP_CLIENT_ID="$$GITHUB_APP_CLIENT_ID" \
+	SSM_PREFIX="$${SSM_PREFIX:-/tilsley/agents/copilot}" \
+	AWS_REGION="$${AWS_REGION:-eu-west-2}" \
+	bun run scripts/copilot-auth.ts

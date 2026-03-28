@@ -9,5 +9,8 @@
     "test:review-agent": "cd agents/review-agent && bun test",
     "test:distiller": "cd agents/distiller && bun test",
     "test:conductor": "cd apps/conductor && bun test"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-ssm": "^3.1019.0"
   }
 }

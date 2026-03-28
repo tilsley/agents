@@ -4,11 +4,14 @@ import { createAppAuth } from "@octokit/auth-app";
 import type { CheckRun, FailureSignature, PullRequest } from "@tilsley/shared";
 import { detectLanguage } from "@tilsley/shared";
 
-// Conductor adapters
-import { GitHubAdapter } from "./adapters/github/github.adapter";
-import { InMemoryOrchestratorAdapter } from "./adapters/orchestrator/in-memory-orchestrator.adapter";
-import { CopilotChatAdapter } from "./adapters/llm/copilot-chat.adapter";
-import { MarkdownMemoryAdapter } from "./adapters/memory/markdown-memory.adapter";
+// Shared infrastructure adapters
+import {
+  GitHubAdapter,
+  CopilotChatAdapter,
+  MarkdownMemoryAdapter,
+  InMemoryOrchestratorAdapter,
+  JsonPolicyAdapter,
+} from "@tilsley/adapters";
 import { KnowledgeAdapter } from "./adapters/memory/knowledge.adapter";
 import { createConductorWebhookServer } from "./adapters/http/webhook.server";
 import { createApiRouter } from "./adapters/http/api.server";
@@ -38,6 +41,9 @@ import { CopilotReviewerAdapter } from "@tilsley/review-agent/src/adapters/llm/c
 import { DistillLessons } from "@tilsley/distiller/src/application/use-cases/distill-lessons";
 import { CopilotSummarizerAdapter } from "@tilsley/distiller/src/adapters/llm/copilot-summarizer.adapter";
 import { CopilotConsolidatorAdapter } from "@tilsley/distiller/src/adapters/llm/copilot-consolidator.adapter";
+
+// Feedback Classifier
+import { CopilotFeedbackClassifierAdapter } from "./adapters/llm/copilot-feedback-classifier.adapter";
 
 // --- Environment ---
 
@@ -76,6 +82,8 @@ const reviewerLlm = new CopilotReviewerAdapter(chatCompletion);
 const summarizerLlm = new CopilotSummarizerAdapter(chatCompletion);
 const consolidatorLlm = new CopilotConsolidatorAdapter(chatCompletion);
 const knowledge = new KnowledgeAdapter(memoryStore);
+const policyStore = new JsonPolicyAdapter();
+const feedbackClassifierLlm = new CopilotFeedbackClassifierAdapter(chatCompletion);
 
 // --- Agent use cases ---
 
@@ -333,6 +341,47 @@ const dispatch: AgentDispatcher = async (
 
       // Pipeline complete — clean up context
       pipelineContexts.delete(correlationId);
+    } else if (agentType === "feedback-classifier") {
+      const owner = payload.owner as string;
+      const repo = payload.repo as string;
+      const commentBody = payload.commentBody as string;
+      const prBody = payload.prBody as string;
+      const prNumber = payload.prNumber as number;
+
+      console.log(
+        `[conductor:feedback-classifier] Classifying comment on PR #${prNumber} in ${owner}/${repo}`
+      );
+
+      const classification = await feedbackClassifierLlm.classify(commentBody, prBody);
+
+      if (!classification.isRule) {
+        console.log(
+          `[conductor:feedback-classifier] Comment is not a rule — ${classification.reasoning}`
+        );
+        return;
+      }
+
+      console.log(
+        `[conductor:feedback-classifier] Extracted rule: "${classification.ruleText}" (${classification.ruleType}, ${classification.scope})`
+      );
+
+      const repoSlug = `${owner}/${repo}`;
+      await policyStore.addRule({
+        type: classification.ruleType,
+        rule: classification.ruleText,
+        source: {
+          kind: "human-feedback",
+          repo: repoSlug,
+          prNumber,
+          date: new Date().toISOString().split("T")[0],
+        },
+        scope: classification.scope,
+        repoSlug: classification.scope === "repo" ? repoSlug : undefined,
+        active: true,
+        confidence: 1.0,
+      });
+
+      console.log(`[conductor:feedback-classifier] Rule stored in policy store`);
     }
   } catch (err) {
     console.error(
@@ -368,4 +417,5 @@ console.log(`[conductor] Health endpoint:  GET  /health`);
 export default {
   port,
   fetch: app.fetch,
+  idleTimeout: 120, // seconds — long-running SSE streams (e.g. patch-agent) need more than the 10s default
 };

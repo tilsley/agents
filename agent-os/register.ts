@@ -9,10 +9,11 @@
  *   bun agent-os/register.ts scribe          # apply one definition
  *   bun agent-os/register.ts --delete scribe # remove one
  */
-import { login, platformConfig } from "./login";
+import { browserLogin, platformConfig } from "@agent-os/client";
+import { CONSOLE_URL } from "./platform";
 
-const cfg = await platformConfig();
-const token = await login(cfg);
+const cfg = await platformConfig(CONSOLE_URL);
+const token = await browserLogin(cfg);
 const auth = { authorization: `Bearer ${token}` };
 
 const args = process.argv.slice(2);

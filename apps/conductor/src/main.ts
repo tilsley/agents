@@ -31,6 +31,7 @@ import type { AgentTask } from "@tilsley/shared";
 import { AnalyzeFailure } from "@tilsley/failure-analyst/src/application/use-cases/analyze-failure";
 import type { FailureDecision } from "@tilsley/failure-analyst/src/domain/entities/failure-analysis";
 import { CopilotClassifierAdapter } from "@tilsley/failure-analyst/src/adapters/llm/copilot-classifier.adapter";
+import { GatewayChatAdapter } from "@tilsley/failure-analyst/src/adapters/llm/gateway-chat.adapter";
 import { InMemoryRetryTracker } from "@tilsley/failure-analyst/src/adapters/state/in-memory-retry-tracker";
 
 // Review Agent
@@ -77,7 +78,18 @@ const orchestrator = new InMemoryOrchestratorAdapter();
 
 // --- Agent adapters ---
 
-const classifierLlm = new CopilotClassifierAdapter(chatCompletion);
+// Failure classification can think through agent-os instead of Copilot (external-agent
+// mode, agent-os ADR-0040/0041): the analyst authenticates as ITSELF (M2M client) and
+// every completion is verified + budget-metered platform-side. Opt in with all four vars.
+const agentOs = process.env["AGENT_OS_GATEWAY_URL"]
+  ? new GatewayChatAdapter({
+      consoleUrl: requireEnv("AGENT_OS_CONSOLE_URL"),
+      gatewayUrl: requireEnv("AGENT_OS_GATEWAY_URL"),
+      clientId: requireEnv("AGENT_OS_M2M_CLIENT_ID"),
+      clientSecret: requireEnv("AGENT_OS_M2M_CLIENT_SECRET"),
+    })
+  : undefined;
+const classifierLlm = new CopilotClassifierAdapter(agentOs ?? chatCompletion);
 const reviewerLlm = new CopilotReviewerAdapter(chatCompletion);
 const summarizerLlm = new CopilotSummarizerAdapter(chatCompletion);
 const consolidatorLlm = new CopilotConsolidatorAdapter(chatCompletion);

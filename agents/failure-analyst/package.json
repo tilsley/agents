@@ -9,6 +9,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@agent-os/client": "file:../../../agent-os/packages/client",
     "@tilsley/shared": "workspace:*"
   }
 }
